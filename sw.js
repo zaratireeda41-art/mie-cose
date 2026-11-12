@@ -1,14 +1,20 @@
 /* Service worker — Mie Cose. Rete prima, cache come riserva per l'uso offline. */
-const VERSION = "mie-cose-v4";
+const VERSION = "mie-cose-v5";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./frasi.js",
+  "./push-config.js",
   "./manifest.json",
+  "./logo.svg",
+  "./logo.png",
   "./icons/icon-180.png",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/icon-192-maskable.png",
+  "./icons/icon-512-maskable.png",
   "./icons/favicon.png",
   "./arm3d.js",
   "./vendor/three.module.min.js",
@@ -49,5 +55,50 @@ self.addEventListener("fetch", (event) => {
       .catch(() =>
         caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
       )
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let title = "Mie Cose";
+  let options = {
+    body: "Hai una nuova frase del momento.",
+    icon: "./icons/icon-192.png",
+    badge: "./icons/favicon.png",
+    lang: "it",
+    tag: "frase-push",
+    data: { url: "./" }
+  };
+  if (event.data) {
+    try {
+      const payload = event.data.json();
+      if (payload && typeof payload === "object") {
+        title = payload.title || title;
+        options = Object.assign(options, payload, { title: undefined });
+        if (payload.body) options.body = payload.body;
+        if (payload.tag) options.tag = payload.tag;
+        if (payload.data) options.data = payload.data;
+      }
+    } catch (err) {
+      const text = event.data.text();
+      if (text) options.body = text;
+    }
+  }
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "./";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ("focus" in client) {
+          client.focus();
+          if (client.navigate) client.navigate(target);
+          return;
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
   );
 });

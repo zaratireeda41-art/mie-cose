@@ -277,6 +277,8 @@
       exams: [],
       transactions: [],
       arm: { milestones: [], parts: [], log: [], poses: [], joints: null, config: null },
+      settings: { notifyPhrases: false, notifyDeadlines: false },
+      phrases: { cursor: "0", favorites: [], lastNotifySlot: null, deadlineLog: {}, pinnedIndex: null, pinnedSlot: null }
     };
   }
 
@@ -293,6 +295,19 @@
     base.arm.poses = Array.isArray(arm.poses) ? arm.poses : [];
     base.arm.joints = arm.joints && typeof arm.joints === "object" ? arm.joints : null;
     base.arm.config = arm.config && typeof arm.config === "object" ? arm.config : null;
+    const settings = raw.settings && typeof raw.settings === "object" ? raw.settings : {};
+    base.settings.notifyPhrases = !!settings.notifyPhrases;
+    base.settings.notifyDeadlines = !!settings.notifyDeadlines;
+    if (settings.pushSubscription && typeof settings.pushSubscription === "object") {
+      base.settings.pushSubscription = settings.pushSubscription;
+    }
+    const ph = raw.phrases && typeof raw.phrases === "object" ? raw.phrases : {};
+    base.phrases.cursor = ph.cursor != null ? String(ph.cursor) : "0";
+    base.phrases.favorites = Array.isArray(ph.favorites) ? ph.favorites : [];
+    base.phrases.lastNotifySlot = ph.lastNotifySlot != null ? ph.lastNotifySlot : null;
+    base.phrases.deadlineLog = ph.deadlineLog && typeof ph.deadlineLog === "object" ? ph.deadlineLog : {};
+    base.phrases.pinnedIndex = ph.pinnedIndex != null ? ph.pinnedIndex : null;
+    base.phrases.pinnedSlot = ph.pinnedSlot != null ? ph.pinnedSlot : null;
     return base;
   }
 
@@ -490,6 +505,289 @@
     return items.slice(0, 8);
   }
 
+
+  const SLOT_MS = 30 * 60 * 1000;
+  let slotTimer = 0;
+
+  function isStandalone() {
+    return window.matchMedia("(display-mode: standalone)").matches || !!navigator.standalone;
+  }
+
+  function isIOSDevice() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function currentSlot() {
+    return Math.floor(Date.now() / SLOT_MS);
+  }
+
+  function minutesToNextSlot() {
+    return Math.ceil((SLOT_MS - (Date.now() % SLOT_MS)) / 60000);
+  }
+
+  function displayedPhrase() {
+    if (!window.MiaFrasi) return null;
+    const slot = currentSlot();
+    const ph = data.phrases;
+    if (ph.pinnedIndex != null && Number(ph.pinnedSlot) === slot) {
+      const p = window.MiaFrasi.phraseAt(ph.pinnedIndex);
+      return p;
+    }
+    return window.MiaFrasi.phraseForSlot(slot);
+  }
+
+  function isFavorite(n) {
+    return (data.phrases.favorites || []).some(function (f) { return Number(f.n) === Number(n); });
+  }
+
+  function toggleFavorite(phrase) {
+    if (!phrase) return;
+    if (isFavorite(phrase.n)) {
+      data.phrases.favorites = data.phrases.favorites.filter(function (f) { return Number(f.n) !== Number(phrase.n); });
+      save();
+      toast("Tolta dai preferiti");
+    } else {
+      data.phrases.favorites.unshift({
+        v: phrase.v || 1,
+        n: phrase.n,
+        text: phrase.text,
+        theme: phrase.theme,
+        addedAt: new Date().toISOString()
+      });
+      save();
+      toast("Aggiunta ai preferiti");
+    }
+  }
+
+  function drawNextPhrase() {
+    if (!window.MiaFrasi) return;
+    let k = Number(data.phrases.cursor || 0);
+    if (!Number.isFinite(k) || k < 0) k = 0;
+    const moment = displayedPhrase();
+    let p = window.MiaFrasi.streamAt(k);
+    let guard = 0;
+    while (moment && p.n === moment.n && guard < 5) {
+      k += 1;
+      p = window.MiaFrasi.streamAt(k);
+      guard += 1;
+    }
+    data.phrases.cursor = String(k + 1);
+    data.phrases.pinnedIndex = p.n;
+    data.phrases.pinnedSlot = currentSlot();
+    save();
+    toast("Nuova frase");
+  }
+
+  function sharePhrase(text) {
+    const payload = { title: "Mie Cose", text: text + "\n— Mie Cose" };
+    if (navigator.share) {
+      navigator.share(payload).catch(function () {});
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(payload.text).then(function () { toast("Frase copiata"); }).catch(function () {
+        toast("Impossibile condividere");
+      });
+      return;
+    }
+    toast("Copia la frase e incollala dove vuoi");
+  }
+
+  function phraseCardHtml() {
+    const p = displayedPhrase();
+    if (!p) return "";
+    const tot = window.MiaFrasi.formatTotal();
+    const mins = minutesToNextSlot();
+    const fav = isFavorite(p.n);
+    const favs = data.phrases.favorites || [];
+    const favHtml = favs.length
+      ? '<div class="phrase-favs"><h2 class="section-title">Frasi preferite</h2><div class="list">' +
+        favs.map(function (f) {
+          return '<div class="row fav-row"><div class="row-body"><span class="row-title">' + escapeHtml(f.text) +
+            "</span></div>" +
+            '<button type="button" class="icon-btn" data-action="phrase-unfav" data-n="' + f.n +
+            '" aria-label="Togli dai preferiti">×</button></div>';
+        }).join("") + "</div></div>"
+      : "";
+    return '<section class="phrase-card" id="frase-momento">' +
+      '<div class="phrase-head"><img src="logo.svg" width="28" height="28" alt="">' +
+      '<div class="copy"><p class="label">Frase del momento</p>' +
+      '<span class="pill">' + escapeHtml(p.themeLabel || "Vita") + "</span></div></div>" +
+      '<blockquote class="phrase-text">' + escapeHtml(p.text) + "</blockquote>" +
+      '<p class="phrase-meta">Una tra ' + escapeHtml(tot.human) + " di frasi possibili (" +
+      escapeHtml(tot.exact) + "). Si rinnova ogni 30 minuti · prossima tra " + mins + " min.</p>" +
+      '<div class="phrase-actions">' +
+      '<button type="button" class="btn-primary" data-action="phrase-new">Nuova</button>' +
+      '<button type="button" class="btn-secondary" data-action="phrase-fav" aria-pressed="' + (fav ? "true" : "false") + '">' +
+      (fav ? "Preferita" : "Preferiti") + "</button>" +
+      '<button type="button" class="btn-secondary" data-action="phrase-share">Condividi</button></div>' +
+      favHtml + "</section>";
+  }
+
+  function vapidPublicKey() {
+    return String(window.MIE_COSE_VAPID_PUBLIC_KEY || "").trim();
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const pad = "=".repeat((4 - base64String.length % 4) % 4);
+    const b64 = (base64String + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(b64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function requestNotifyPermission() {
+    if (!("Notification" in window)) {
+      toast("Questo dispositivo non supporta le notifiche.");
+      return false;
+    }
+    if (Notification.permission === "granted") return true;
+    if (Notification.permission === "denied") {
+      toast("Le notifiche sono bloccate nelle impostazioni del telefono.");
+      return false;
+    }
+    try {
+      const r = await Notification.requestPermission();
+      return r === "granted";
+    } catch (err) {
+      toast("Impossibile chiedere il permesso per le notifiche.");
+      return false;
+    }
+  }
+
+  async function showLocalNotification(title, body, tag, data) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const opts = {
+      body: body,
+      icon: "./icons/icon-192.png",
+      badge: "./icons/favicon.png",
+      lang: "it",
+      tag: tag || "mie-cose",
+      renotify: !!tag,
+      data: data || { url: "./" }
+    };
+    try {
+      if (navigator.serviceWorker) {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.showNotification(title, opts);
+        return;
+      }
+    } catch (err) {}
+    try { new Notification(title, opts); } catch (err) {}
+  }
+
+  async function maybeNotifyPhrase() {
+    if (!data.settings.notifyPhrases) return;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const slot = currentSlot();
+    if (data.phrases.lastNotifySlot === slot) return;
+    const p = window.MiaFrasi ? window.MiaFrasi.phraseForSlot(slot) : null;
+    data.phrases.lastNotifySlot = slot;
+    save();
+    await showLocalNotification("Frase del momento", p ? p.text : "Hai una nuova frase in Mie Cose.", "frase-momento");
+  }
+
+  async function maybeNotifyDeadlines() {
+    if (!data.settings.notifyDeadlines) return;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const today = todayISO();
+    const log = data.phrases.deadlineLog || {};
+    const items = [];
+    data.tasks.forEach(function (t) {
+      if (t.done || !t.due) return;
+      const day = String(t.due).slice(0, 10);
+      if (day > today && !isOverdue(t)) return;
+      if (day > today) return;
+      const key = "task-" + t.id + "-" + today;
+      if (log[key]) return;
+      items.push({ key: key, title: "Scadenza", body: t.title + (isOverdue(t) ? " · in ritardo" : " · oggi") });
+    });
+    const limit = new Date();
+    limit.setDate(limit.getDate() + 3);
+    const limitISO = toISODate(limit);
+    data.exams.forEach(function (e) {
+      if (e.stato === "superato" || !e.dataAppello) return;
+      const day = String(e.dataAppello).slice(0, 10);
+      if (day < today || day > limitISO) return;
+      const key = "exam-" + e.id + "-" + today;
+      if (log[key]) return;
+      items.push({ key: key, title: "Appello", body: e.materia + " · " + relativeDue(e.dataAppello) });
+    });
+    if (!items.length) return;
+    items.slice(0, 3).forEach(function (it) { log[it.key] = true; });
+    data.phrases.deadlineLog = log;
+    save();
+    for (let i = 0; i < Math.min(3, items.length); i++) {
+      await showLocalNotification(items[i].title, items[i].body, items[i].key);
+    }
+  }
+
+  function armSlotTimer() {
+    clearTimeout(slotTimer);
+    const wait = (SLOT_MS - (Date.now() % SLOT_MS)) + 400;
+    slotTimer = setTimeout(function () {
+      onSlotBoundary();
+      armSlotTimer();
+    }, wait);
+  }
+
+  function onSlotBoundary() {
+    maybeNotifyPhrase();
+    maybeNotifyDeadlines();
+    if (tab === "home" && !examDetailId) render();
+  }
+
+  async function toggleNotifySetting(which) {
+    const turningOn = !data.settings[which];
+    if (turningOn) {
+      if (isIOSDevice() && !isStandalone()) {
+        toast("Su iPhone: prima aggiungi l’app alla schermata Home, poi riapri Mie Cose e attiva le notifiche.");
+        return;
+      }
+      const ok = await requestNotifyPermission();
+      if (!ok) return;
+    }
+    data.settings[which] = turningOn;
+    save();
+    if (turningOn) {
+      if (which === "notifyPhrases") maybeNotifyPhrase();
+      if (which === "notifyDeadlines") maybeNotifyDeadlines();
+      toast("Notifiche attivate");
+    } else {
+      toast("Notifiche disattivate");
+    }
+    render();
+  }
+
+  async function subscribePushIfConfigured() {
+    const key = vapidPublicKey();
+    if (!key) {
+      toast("Nessuna chiave VAPID configurata. Serve un server push, vedi PUSH.md.");
+      return;
+    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      toast("Il push non è disponibile su questo dispositivo.");
+      return;
+    }
+    const ok = await requestNotifyPermission();
+    if (!ok) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key)
+      });
+      data.settings.pushSubscription = sub.toJSON();
+      save();
+      toast("Iscrizione push salvata su questo telefono. Per completarla serve il server descritto in PUSH.md.");
+      render();
+    } catch (err) {
+      toast("Iscrizione push non riuscita.");
+    }
+  }
+
   function renderHome() {
     const openTasks = data.tasks.filter(function (t) { return !t.done; });
     const overdue = openTasks.filter(isOverdue).length;
@@ -532,7 +830,8 @@
     const inBar = Math.round((monthIn / monthMax) * 100);
     const outBar = Math.round((monthOut / monthMax) * 100);
 
-    return '<div class="stats">' +
+    return phraseCardHtml() +
+      '<div class="stats">' +
       '<div class="stat tint-tasks"><div class="stat-row"><div class="copy"><p class="label">Da fare</p><div class="value">' + openTasks.length +
       '</div><div class="sub">' + taskSub + '</div></div>' + progressRing(taskPct, { size: 56, stroke: 6, cls: "tasks" }) + "</div></div>" +
       '<div class="stat tint-study"><p class="label">Prossimo esame</p><div class="value" style="font-size:18px;padding-top:4px">' +
@@ -693,7 +992,7 @@
     });
     const mediaLabel = media == null ? "—" : numFmt.format(Math.round(media * 10) / 10);
     const pct = totals.previsti ? Math.min(100, (totals.acquisiti / totals.previsti) * 100) : 0;
-    const list = exams.length ? exams.map(examCard).join("") : emptyState("Nessun esame", "Aggiungi le materie con data d'appello, CFU e stato. Potrai annotare le sessioni di studio.", "study");
+    const list = exams.length ? exams.map(examCard).join("") : emptyState("Nessun esame", "Aggiungi le materie con data d’appello, CFU e stato. Potrai annotare le sessioni di studio.", "study");
 
     return '<div class="hero-stat hero-split"><div class="hero-copy"><p class="label">Media ponderata</p><div class="value">' + mediaLabel + "</div>" +
       '<div class="row-meta" style="margin-top:8px"><span>' + totals.acquisiti + " CFU acquisiti · " + totals.previsti + " CFU previsti</span></div>" +
@@ -1286,7 +1585,27 @@
   function renderSettings() {
     const n = data.tasks.length + data.exams.length + data.transactions.length +
       data.arm.milestones.length + data.arm.parts.length + data.arm.log.length;
+    const perm = ("Notification" in window) ? Notification.permission : "unsupported";
+    const permLabel = perm === "granted" ? "Permesso concesso" : perm === "denied" ? "Permesso negato" : perm === "unsupported" ? "Non supportate da questo browser" : "Permesso non ancora chiesto";
+    const iosTip = (isIOSDevice() && !isStandalone())
+      ? '<div class="callout warn">Su iPhone le notifiche funzionano solo se l’app è installata: Safari → Condividi → <strong>Aggiungi alla schermata Home</strong>, poi aprila da lì (iOS 16.4 o successivo).</div>'
+      : "";
+    const vapid = vapidPublicKey();
+    const pushBlock = vapid
+      ? '<div class="list"><button type="button" class="action-row" data-action="push-subscribe"><div class="left"><span>Iscriviti al push (app chiusa)</span><span>' +
+        (data.settings.pushSubscription ? "Iscrizione già salvata su questo telefono. Serve ancora il server per l'invio." : "Chiave VAPID presente: iscrive questo dispositivo. L'invio a app chiusa richiede il server descritto in PUSH.md.") +
+        "</span></div>" + iconChevron() + "</button></div>"
+      : '<p class="hint">Per ricevere le frasi anche a app completamente chiusa serve un piccolo server di invio (Web Push) e una chiave VAPID pubblica in <span style="white-space:nowrap">push-config.js</span>. Il piano, gratuito, è descritto in PUSH.md. Senza server, le notifiche partono solo mentre l’app è aperta o lasciata poco in secondo piano.</p>';
+    const notifyHtml = '<h2 class="section-title">Notifiche</h2>' + iosTip +
+      '<div class="list">' +
+      '<div class="row"><button type="button" class="switch-row" data-action="toggle-notify-phrases"><div class="left"><span>Frasi ogni 30 minuti</span><span>Una frase nuova, se l’app è aperta o in secondo piano per poco</span></div>' +
+      '<span class="switch' + (data.settings.notifyPhrases ? " on" : "") + '" role="switch" aria-checked="' + (data.settings.notifyPhrases ? "true" : "false") + '"></span></button></div>' +
+      '<div class="row"><button type="button" class="switch-row" data-action="toggle-notify-deadlines"><div class="left"><span>Promemoria scadenze e appelli</span><span>Avviso per cose da fare in scadenza o in ritardo e per gli appelli vicini</span></div>' +
+      '<span class="switch' + (data.settings.notifyDeadlines ? " on" : "") + '" role="switch" aria-checked="' + (data.settings.notifyDeadlines ? "true" : "false") + '"></span></button></div></div>' +
+      '<p class="hint" style="margin:8px 4px 14px">' + escapeHtml(permLabel) + ". Con l’app chiusa del tutto, iOS e gli altri sistemi richiedono un servizio push.</p>" +
+      pushBlock;
     return '<div class="callout">I dati restano solo su questo iPhone, nel browser. Non passano da nessun server. Fai un backup di tanto in tanto, soprattutto prima di cancellare i dati di Safari.</div>' +
+      notifyHtml +
       '<h2 class="section-title">Copie di sicurezza</h2><div class="list">' +
       '<button type="button" class="action-row" data-action="export"><div class="left"><span>Esporta backup JSON</span><span>Scarica una copia di tutti i dati</span></div>' + iconChevron() + "</button>" +
       '<button type="button" class="action-row" data-action="import"><div class="left"><span>Importa backup JSON</span><span>Sostituisce i dati attuali</span></div>' + iconChevron() + "</button></div>" +
@@ -1398,6 +1717,7 @@
         joints: { base: 25, shoulder: -35, elbow: 55, wrist: 20, roll: 0, gripper: 40 }
       }
     };
+    data = normalize(data);
     save();
   }
 
@@ -1451,6 +1771,14 @@
     if (t.dataset.editMilestone) { openMilestoneForm(t.dataset.editMilestone); return; }
     if (t.dataset.editPart) { openPartForm(t.dataset.editPart); return; }
     if (t.dataset.editLog) { openLogForm(t.dataset.editLog); return; }
+    if (t.dataset.action === "phrase-unfav") {
+      const n = t.dataset.n;
+      data.phrases.favorites = (data.phrases.favorites || []).filter(function (f) { return String(f.n) !== String(n); });
+      save();
+      toast("Tolta dai preferiti");
+      render();
+      return;
+    }
     if (t.dataset.action) handleAction(t.dataset.action);
   }
 
@@ -1464,6 +1792,22 @@
       case "add-part": openPartForm(); break;
       case "add-log": openLogForm(); break;
       case "goto-settings": tab = "settings"; render(); break;
+      case "phrase-new":
+        drawNextPhrase();
+        render();
+        break;
+      case "phrase-fav":
+        toggleFavorite(displayedPhrase());
+        render();
+        break;
+      case "phrase-share": {
+        const cur = displayedPhrase();
+        if (cur) sharePhrase(cur.text);
+        break;
+      }
+      case "toggle-notify-phrases": toggleNotifySetting("notifyPhrases"); break;
+      case "toggle-notify-deadlines": toggleNotifySetting("notifyDeadlines"); break;
+      case "push-subscribe": subscribePushIfConfigured(); break;
       case "export": exportBackup(); break;
       case "import": $("#import-file").click(); break;
       case "demo":
@@ -1508,9 +1852,25 @@
       if (tab === "arm" && !examDetailId) mountArm3D();
     });
     render();
+    armSlotTimer();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(function () {});
     }
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") {
+        maybeNotifyPhrase();
+        maybeNotifyDeadlines();
+        if (tab === "home" && !examDetailId) render();
+      }
+    });
+    window.addEventListener("focus", function () {
+      maybeNotifyPhrase();
+      maybeNotifyDeadlines();
+    });
+    setTimeout(function () {
+      maybeNotifyPhrase();
+      maybeNotifyDeadlines();
+    }, 800);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

@@ -1384,3 +1384,149 @@ body.standalone .install-hint { display: none; }
   .arm-hud-tau { display: none; }
   .arm-setup-row { grid-template-columns: 1fr; }
 }
+
+/* —— Logo in testata —— */
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+  box-shadow: var(--shadow);
+  object-fit: cover;
+  background: transparent;
+}
+.topbar-inner:has(#back-btn:not(.hidden)) .brand-logo {
+  display: none;
+}
+
+/* —— Frase del momento —— */
+.phrase-card {
+  position: relative;
+  margin: 0 0 18px;
+  padding: 16px 16px 14px;
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+  overflow: hidden;
+}
+.phrase-card::before {
+  content: "";
+  position: absolute;
+  inset: auto auto -40px -30px;
+  width: 140px;
+  height: 140px;
+  background: url("logo.svg") center / contain no-repeat;
+  opacity: 0.08;
+  pointer-events: none;
+}
+.phrase-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.phrase-head img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.phrase-head .copy { min-width: 0; }
+.phrase-head .label { margin: 0; }
+.phrase-text {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.35;
+  color: var(--label);
+}
+.phrase-meta {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--label-tertiary);
+  line-height: 1.4;
+}
+.phrase-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.phrase-actions .btn-secondary,
+.phrase-actions .btn-primary {
+  margin: 0;
+  padding: 10px 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.phrase-actions [aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated-solid));
+  color: var(--accent-text);
+}
+.phrase-favs { margin-top: 14px; }
+.phrase-favs .section-title { margin-bottom: 8px; }
+.fav-row .row-title {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+/* —— Interruttori impostazioni —— */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: transparent;
+}
+.switch-row .left { flex: 1; min-width: 0; }
+.switch-row .left span:first-child {
+  display: block;
+  font-weight: 600;
+}
+.switch-row .left span:last-child {
+  display: block;
+  font-size: 13px;
+  color: var(--label-secondary);
+  font-weight: 500;
+}
+.switch {
+  position: relative;
+  width: 51px;
+  height: 31px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  border: 0;
+  padding: 0;
+  transition: background 0.2s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+  transition: transform 0.22s var(--ease-out, ease);
+}
+.switch.on {
+  background: var(--accent);
+}
+.switch.on::after { transform: translateX(20px); }
+.switch:active::after { transform: translateX(2px) scaleX(1.06); }
+.switch.on:active::after { transform: translateX(18px) scaleX(1.06); }
+@media (max-width: 360px) {
+  .phrase-text { font-size: 18px; }
+  .phrase-actions { grid-template-columns: 1fr; }
+}
