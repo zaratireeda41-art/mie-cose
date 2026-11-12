@@ -1,5 +1,5 @@
 /* Service worker — Mie Cose. Rete prima, cache come riserva per l'uso offline. */
-const VERSION = "mie-cose-v3";
+const VERSION = "mie-cose-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -12,7 +12,9 @@ const ASSETS = [
   "./icons/favicon.png",
   "./arm3d.js",
   "./vendor/three.module.min.js",
-  "./vendor/OrbitControls.js"
+  "./vendor/OrbitControls.js",
+  "./vendor/RoomEnvironment.js",
+  "./vendor/cannon-es.min.js"
 ];
 
 self.addEventListener("install", (event) => {

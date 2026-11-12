@@ -233,6 +233,11 @@
     window.MiaArm3D.mount(document.getElementById("arm-viewport"), {
       joints: data.arm.joints,
       poses: data.arm.poses || [],
+      config: data.arm.config,
+      onConfigChange: function (config) {
+        data.arm.config = config;
+        save();
+      },
       onChange: function (joints) {
         data.arm.joints = joints;
         save();
@@ -271,7 +276,7 @@
       tasks: [],
       exams: [],
       transactions: [],
-      arm: { milestones: [], parts: [], log: [], poses: [], joints: null },
+      arm: { milestones: [], parts: [], log: [], poses: [], joints: null, config: null },
     };
   }
 
@@ -287,6 +292,7 @@
     base.arm.log = Array.isArray(arm.log) ? arm.log : [];
     base.arm.poses = Array.isArray(arm.poses) ? arm.poses : [];
     base.arm.joints = arm.joints && typeof arm.joints === "object" ? arm.joints : null;
+    base.arm.config = arm.config && typeof arm.config === "object" ? arm.config : null;
     return base;
   }
 
@@ -1038,6 +1044,39 @@
     }, 0);
   }
 
+
+  function armSetupHtml() {
+    const c = data.arm.config || {};
+    const payload = c.payload != null ? String(c.payload) : "0.05";
+    const servo = c.servo || "MG996R";
+    const cm = function (key, fallback) {
+      const n = Number(c[key]);
+      return String((Number.isFinite(n) ? n : fallback) * 100);
+    };
+    const optPay = [["0","0 g"],["0.05","50 g"],["0.1","100 g"],["0.2","200 g"],["0.5","500 g"]].map(function (o) {
+      return '<option value="' + o[0] + '"' + (payload === o[0] ? " selected" : "") + ">" + o[1] + "</option>";
+    }).join("");
+    const optServo = [
+      ["MG996R", "MG996R (1,1 N·m)"],
+      ["DS3218", "DS3218 (2,0 N·m)"],
+      ["SG90", "SG90 (0,18 N·m)"]
+    ].map(function (o) {
+      return '<option value="' + o[0] + '"' + (servo === o[0] ? " selected" : "") + ">" + o[1] + "</option>";
+    }).join("");
+    return '<div class="arm-setup">' +
+      '<h2 class="section-title" style="margin-top:14px">Il mio braccio</h2>' +
+      '<p class="hint">Regola lunghezze e servo come sul braccio vero: la fisica della coppia e la portata della pinza si adeguano.</p>' +
+      '<div class="arm-setup-row">' +
+      '<label class="arm-field"><span>Carico</span><select data-arm-payload>' + optPay + "</select></label>" +
+      '<label class="arm-field"><span>Servo</span><select data-arm-servo>' + optServo + "</select></label></div>" +
+      '<div class="arm-setup-grid">' +
+      '<label class="arm-field"><span>Braccio (cm)</span><input data-arm-cfg="L1" type="number" inputmode="decimal" step="0.5" min="6" max="40" value="' + cm("L1", 0.15) + '"></label>' +
+      '<label class="arm-field"><span>Avambraccio (cm)</span><input data-arm-cfg="L2" type="number" inputmode="decimal" step="0.5" min="6" max="40" value="' + cm("L2", 0.12) + '"></label>' +
+      '<label class="arm-field"><span>Polso-pinza (cm)</span><input data-arm-cfg="L3" type="number" inputmode="decimal" step="0.5" min="3" max="25" value="' + cm("L3", 0.09) + '"></label>' +
+      '<label class="arm-field"><span>Altezza base (cm)</span><input data-arm-cfg="baseH" type="number" inputmode="decimal" step="0.5" min="4" max="20" value="' + cm("baseH", 0.08) + '"></label></div>' +
+      '<button type="button" class="btn-secondary arm-btn" data-arm="apply-config">Applica misure</button></div>';
+  }
+
   function renderArm() {
     const ms = data.arm.milestones.slice();
     const done = ms.filter(function (m) { return m.done; }).length;
@@ -1108,12 +1147,14 @@
 
     return '<section class="arm-3d" id="arm-3d">' +
       '<div class="arm-stage" id="arm-viewport"></div>' +
-      '<p class="arm-stage-hint">Trascina per ruotare · pizzica per lo zoom</p>' +
+      '<div class="arm-hud" id="arm-telemetry" aria-hidden="true"></div>' +
+      '<p class="arm-stage-hint">Trascina per ruotare · pizzica per lo zoom · tocca il piano o un oggetto per spostare la pinza</p>' +
       '<div class="arm-actions">' +
       '<button type="button" class="btn-primary arm-btn" data-arm="demo">Demo</button>' +
       '<button type="button" class="btn-secondary arm-btn" data-arm="reset">Reset</button>' +
       "</div>" +
       '<div class="arm-sliders">' + sliderHtml + "</div>" +
+      armSetupHtml() +
       '<div class="arm-pose-save"><input id="arm-pose-name" type="text" maxlength="40" placeholder="Nome della pose" autocomplete="off">' +
       '<button type="button" class="btn-secondary arm-btn" data-arm="save-pose">Salva pose</button></div>' +
       '<h2 class="section-title" style="margin-top:14px">Pose salvate</h2>' + poseHtml +
