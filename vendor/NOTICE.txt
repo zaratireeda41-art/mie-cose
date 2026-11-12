@@ -1,0 +1,2 @@
+Three.js r187 (MIT) — https://threejs.org
+Vendored for offline use in Mie Cose.
