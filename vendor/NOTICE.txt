@@ -1,2 +1,5 @@
 Three.js r187 (MIT) — https://threejs.org
+  Includes examples/jsm/controls/OrbitControls.js and
+  examples/jsm/environments/RoomEnvironment.js.
+cannon-es 0.20.0 (MIT) — https://github.com/pmndrs/cannon-es
 Vendored for offline use in Mie Cose.
