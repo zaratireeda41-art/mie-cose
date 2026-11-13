@@ -171,16 +171,13 @@
     return formatDate(iso, { withWeekday: true, withYear: d.getFullYear() !== new Date().getFullYear(), short: true }) + timeBit;
   }
 
-  function greeting() {
-    const h = new Date().getHours();
-    if (h < 12) return "Buongiorno";
-    if (h < 18) return "Buon pomeriggio";
-    return "Buonasera";
-  }
-
   function headerDate() {
     const d = new Date();
     return WEEKDAYS[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()];
+  }
+
+  function headerEyebrowHome() {
+    return "Reeda · " + headerDate();
   }
 
   function iconCheck() {
@@ -491,6 +488,7 @@
       back.classList.remove("hidden");
       back.classList.add("back-chevron");
       back.innerHTML = backChevron("Studio");
+      if (MM && MM.stopRoleTypewriter) MM.stopRoleTypewriter();
       eyebrow.textContent = "Esame";
       title.textContent = exam ? exam.materia : "Esame";
       fab.classList.remove("hidden");
@@ -503,7 +501,7 @@
     }
 
     const views = {
-      home: { eyebrow: headerDate(), title: greeting(), render: renderHome },
+      home: { eyebrow: headerEyebrowHome(), roleTypewriter: true, render: renderHome },
       tasks: { eyebrow: "", title: "Da fare", render: renderTasks, fab: "Aggiungi cosa da fare", action: "add-task" },
       study: { eyebrow: "", title: "Studio", render: renderStudy, fab: "Aggiungi esame", action: "add-exam" },
       money: { eyebrow: "", title: "Soldi", render: renderMoney, fab: "Aggiungi movimento", action: "add-tx" },
@@ -513,7 +511,13 @@
 
     const view = views[tab] || views.home;
     eyebrow.textContent = view.eyebrow;
-    title.textContent = view.title;
+    if (view.roleTypewriter) {
+      if (MM && MM.startRoleTypewriter) MM.startRoleTypewriter(title);
+      else title.textContent = "CEO";
+    } else {
+      if (MM && MM.stopRoleTypewriter) MM.stopRoleTypewriter();
+      title.textContent = view.title;
+    }
     if (view.fab) {
       fab.classList.remove("hidden");
       fab.setAttribute("aria-label", view.fab);

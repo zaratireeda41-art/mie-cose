@@ -76,6 +76,39 @@ body.paused .orb, body.paused .aurora, body.paused .fab::after { animation-play-
 .topbar-titles.swap { animation: titleIn 0.55s var(--spring-soft) backwards; }
 @keyframes titleIn { from { opacity: 0; transform: translate3d(0, 10px, 0); } }
 
+/* —— Titolo scritto a macchina —— */
+.topbar h1.typewriter {
+  display: grid;
+  justify-items: start;
+  align-items: end;
+  min-height: 1.05em;
+}
+.topbar h1.typewriter .tw-sizer,
+.topbar h1.typewriter .tw-live {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.topbar h1.typewriter .tw-sizer {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+  padding-right: 0.22em;
+}
+.topbar h1.typewriter .tw-caret {
+  display: inline-block;
+  width: 0.085em;
+  height: 0.82em;
+  margin-left: 0.08em;
+  background: currentColor;
+  vertical-align: -0.04em;
+  border-radius: 1px;
+  animation: twBlink 1.05s steps(1, end) infinite;
+}
+@keyframes twBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
 /* —— Transizioni di pagina —— */
 .content { will-change: scroll-position; }
 .content.enter > * { animation: none; }
@@ -456,9 +489,10 @@ body.paused .orb, body.paused .aurora, body.paused .fab::after { animation-play-
   .content.enter > *, .content.enter .list > *, .content.enter .stats > *, .phrase-card.reveal .w, .phrase-card.reveal .phrase-head img,
   .tab.bounce svg, .tab.bounce span, .fab.fab-in, .topbar-titles.swap, .b, .b14, .donut-seg, .dl-row, .pill.days-left.hot,
   .streak.on svg, .toast, .toast.out, .sheet-body .field, .swipe.completing .swipe-row, .check.just-on, .check.just-on svg,
-  .content.enter .task-progress > span, .arm-stage::after, .splash img, .splash p, .splash-glow {
+  .content.enter .task-progress > span, .arm-stage::after, .splash img, .splash p, .splash-glow, .tw-caret {
     animation: none !important;
   }
+  .tw-caret { display: none; }
   .check.just-on svg { stroke-dashoffset: 0; }
   .tab-glider, .seg-glider, .live-day-bar > span, .slot-bar > span, .task-progress > span,
   .stat, .hero-stat, .exam-card, .phrase-card, .live-hero, .chart-card, .sheet { transition: none !important; }

@@ -207,6 +207,116 @@
     t.classList.add("swap");
   };
 
+  /* —— Titolo Inizio: ruoli scritti come a macchina —— */
+  var ROLES = ["CEO", "MAGISTRATO", "NOTAIO", "GIURISTA"];
+  var tw = {
+    running: false,
+    timer: 0,
+    idx: 0,
+    pos: 0,
+    mode: "type",
+    h1: null,
+    textEl: null
+  };
+
+  function twClearTimer() {
+    if (tw.timer) { clearTimeout(tw.timer); tw.timer = 0; }
+  }
+
+  function twPaused() {
+    return !tw.running || document.visibilityState !== "visible" || !tw.h1 || !tw.h1.isConnected;
+  }
+
+  function twPaint() {
+    if (!tw.textEl) return;
+    var word = ROLES[tw.idx] || "";
+    tw.textEl.textContent = word.slice(0, Math.max(0, tw.pos));
+    if (tw.h1) tw.h1.setAttribute("aria-label", word);
+  }
+
+  function twSchedule(ms) {
+    twClearTimer();
+    tw.timer = setTimeout(twTick, ms);
+  }
+
+  function twTick() {
+    tw.timer = 0;
+    if (twPaused()) return;
+    var word = ROLES[tw.idx] || "";
+    var delay = 80;
+
+    if (M.reduced()) {
+      if (tw.mode === "hold") {
+        tw.idx = (tw.idx + 1) % ROLES.length;
+      }
+      word = ROLES[tw.idx];
+      tw.pos = word.length;
+      tw.mode = "hold";
+      twPaint();
+      twSchedule(2000);
+      return;
+    }
+
+    if (tw.mode === "type") {
+      tw.pos++;
+      twPaint();
+      if (tw.pos >= word.length) {
+        tw.mode = "hold";
+        delay = 2000;
+      } else {
+        delay = 72;
+      }
+    } else if (tw.mode === "hold") {
+      tw.mode = "delete";
+      delay = 40;
+    } else {
+      tw.pos--;
+      twPaint();
+      if (tw.pos <= 0) {
+        tw.pos = 0;
+        tw.idx = (tw.idx + 1) % ROLES.length;
+        tw.mode = "type";
+        delay = 280;
+      } else {
+        delay = 42;
+      }
+    }
+    twSchedule(delay);
+  }
+
+  function twOnVisibility() {
+    if (document.visibilityState === "visible" && tw.running && !tw.timer) twTick();
+    else if (document.visibilityState !== "visible") twClearTimer();
+  }
+
+  M.startRoleTypewriter = function (h1) {
+    if (!h1) return;
+    tw.running = true;
+    if (tw.h1 === h1 && h1.classList.contains("typewriter") && h1.querySelector(".tw-text")) {
+      tw.textEl = h1.querySelector(".tw-text");
+      if (!tw.timer) twSchedule(0);
+      return;
+    }
+    tw.h1 = h1;
+    h1.classList.add("typewriter");
+    h1.innerHTML = '<span class="tw-sizer" aria-hidden="true">MAGISTRATO</span>' +
+      '<span class="tw-live" aria-hidden="true"><span class="tw-text"></span><span class="tw-caret"></span></span>';
+    tw.textEl = h1.querySelector(".tw-text");
+    twPaint();
+    if (!tw.timer) twSchedule(tw.mode === "type" && tw.pos === 0 ? 160 : 0);
+  };
+
+  M.stopRoleTypewriter = function () {
+    tw.running = false;
+    twClearTimer();
+    if (tw.h1) {
+      tw.h1.classList.remove("typewriter");
+      tw.h1.removeAttribute("aria-label");
+    }
+    tw.h1 = null;
+    tw.textEl = null;
+  };
+
   /* —— FAB che rimbalza —— */
   M.popFab = function () {
     var f = document.getElementById("fab");
@@ -567,6 +677,7 @@
     window.addEventListener("resize", function () { M.updateTabGlider(false); sizeCanvas(); });
     document.addEventListener("visibilitychange", function () {
       document.body.classList.toggle("paused", document.visibilityState !== "visible");
+      twOnVisibility();
     });
   };
 
