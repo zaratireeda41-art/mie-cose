@@ -3,6 +3,9 @@ import * as THREE from "./vendor/three.module.min.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
 import * as CANNON from "./vendor/cannon-es.min.js";
+import { RoundedBoxGeometry } from "./vendor/RoundedBoxGeometry.js";
+import { mergeGeometries } from "./vendor/BufferGeometryUtils.js";
+import * as TX from "./arm-textures.js";
 
 const HOME = Object.freeze({
   base: 25,
@@ -508,80 +511,54 @@ function jointsSettled(state, targets, degTol) {
   });
 }
 
-/* ---------- Materiali PBR ---------- */
+/* ---------- Materiali PBR (realistici) ---------- */
 
-function makeMaterials(dark) {
-  const env = 1.05;
-  const mk = (opts) =>
-    new THREE.MeshPhysicalMaterial(Object.assign({ envMapIntensity: env }, opts));
+function makeMaterials(dark, maxAniso) {
+  const brushed = TX.brushedTexture();
+  const turned = TX.turnedTexture();
+  const carbon = TX.carbonTexture();
+  const ridge = TX.ridgeTexture();
+  [brushed, carbon].forEach((t) => {
+    t.anisotropy = maxAniso;
+  });
+  const std = (o) => new THREE.MeshStandardMaterial(o);
+  const phy = (o) => new THREE.MeshPhysicalMaterial(o);
+  const brushedRep = brushed.clone();
+  brushedRep.repeat.set(1, 6);
+  brushedRep.needsUpdate = true;
   return {
-    alu: mk({
-      color: dark ? 0xb9bec8 : 0xc5cad3,
-      metalness: 0.92,
-      roughness: 0.28,
-      clearcoat: 0.18,
-      clearcoatRoughness: 0.4,
-    }),
-    aluDark: mk({
-      color: dark ? 0x5c616c : 0x4a4e58,
-      metalness: 0.9,
-      roughness: 0.34,
-      clearcoat: 0.1,
-    }),
-    servo: mk({
-      color: dark ? 0x1c1c20 : 0x16161a,
-      metalness: 0.18,
-      roughness: 0.55,
-      clearcoat: 0.08,
-    }),
-    horn: mk({
-      color: 0x26262c,
-      metalness: 0.25,
-      roughness: 0.45,
-    }),
-    accent: mk({
+    alu: std({ color: 0xd3d6db, metalness: 1, roughness: 0.5, roughnessMap: brushed, envMapIntensity: 1.1 }),
+    aluTurned: std({ color: 0xd8dbe0, metalness: 1, roughness: 0.42, roughnessMap: turned, envMapIntensity: 1.15 }),
+    aluBlack: std({ color: 0x1e2024, metalness: 0.8, roughness: 0.62, roughnessMap: brushed, envMapIntensity: 0.9 }),
+    aluOrange: std({ color: 0xe8651c, metalness: 0.75, roughness: 0.42, roughnessMap: brushed, envMapIntensity: 1 }),
+    steel: std({ color: 0xc4c8cd, metalness: 1, roughness: 0.24, envMapIntensity: 1.2 }),
+    steelDark: std({ color: 0x7d8288, metalness: 1, roughness: 0.38, roughnessMap: brushedRep }),
+    socket: std({ color: 0x0b0c0d, metalness: 0.6, roughness: 0.55 }),
+    brass: std({ color: 0xc9a65a, metalness: 1, roughness: 0.3 }),
+    servo: phy({ color: 0x121316, metalness: 0, roughness: 0.42, clearcoat: 0.25, clearcoatRoughness: 0.5 }),
+    servoBlue: phy({ color: 0x2457d6, metalness: 0, roughness: 0.28, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
+    horn: std({ color: 0xefeee8, metalness: 0, roughness: 0.48 }),
+    stickerMg: std({ map: TX.servoSticker("mg"), metalness: 0, roughness: 0.35 }),
+    stickerSg: std({ map: TX.servoSticker("sg"), metalness: 0, roughness: 0.35 }),
+    carbon: phy({ map: carbon, color: 0xffffff, metalness: 0.35, roughness: 0.45, clearcoat: 1, clearcoatRoughness: 0.06 }),
+    rubber: std({ color: 0x17171a, metalness: 0, roughness: 0.9 }),
+    pad: std({ color: 0x1b1b1e, metalness: 0, roughness: 0.85, bumpMap: ridge, bumpScale: 2 }),
+    sleeve: std({ color: 0x141518, metalness: 0.05, roughness: 0.7 }),
+    tie: std({ color: 0xf2f2ee, metalness: 0, roughness: 0.55 }),
+    wireBrown: std({ color: 0x4a2c1a, roughness: 0.45 }),
+    wireRed: std({ color: 0xb01e18, roughness: 0.45 }),
+    wireOrange: std({ color: 0xe0861a, roughness: 0.45 }),
+    label: std({ map: TX.labelTexture(), metalness: 0.7, roughness: 0.38 }),
+    led: std({ color: 0x0a2a12, emissive: 0x23ff6a, emissiveIntensity: 2.4, roughness: 0.2 }),
+    marker: std({
       color: 0xff7a1a,
-      metalness: 0.5,
-      roughness: 0.32,
-      emissive: 0xff7a1a,
-      emissiveIntensity: dark ? 0.18 : 0.08,
-    }),
-    brass: mk({
-      color: 0xc4a35a,
-      metalness: 1,
-      roughness: 0.24,
-    }),
-    rubber: mk({
-      color: 0x1a1a1e,
-      metalness: 0.04,
-      roughness: 0.88,
-    }),
-    cable: mk({
-      color: dark ? 0x2a2a30 : 0x1f1f24,
-      metalness: 0.12,
-      roughness: 0.72,
-    }),
-    pad: mk({
-      color: 0x2b2b30,
-      metalness: 0.05,
-      roughness: 0.9,
-    }),
-    floor: mk({
-      color: dark ? 0x1b1c24 : 0xe6e4ef,
-      metalness: 0.12,
-      roughness: 0.55,
-      clearcoat: 0.2,
-      clearcoatRoughness: 0.5,
-      envMapIntensity: 0.7,
-    }),
-    marker: mk({
-      color: 0xff7a1a,
-      metalness: 0.3,
+      metalness: 0,
       roughness: 0.4,
       emissive: 0xff7a1a,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 1.4,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.85,
+      depthWrite: false,
     }),
   };
 }
@@ -598,209 +575,598 @@ function addMesh(parent, world, geo, mat, pos, rot, shadow) {
     m.receiveShadow = true;
   }
   if (pos) m.position.set(pos[0], pos[1], pos[2]);
-  if (rot) m.rotation.set(rot[0], rot[1], rot[2]);
+  if (rot) {
+    if (rot.length > 3) m.rotation.set(rot[0], rot[1], rot[2], rot[3]);
+    else m.rotation.set(rot[0], rot[1], rot[2]);
+  }
   parent.add(m);
   return m;
 }
 
-function bolt(world, mats) {
-  return trackGeo(world, new THREE.CylinderGeometry(0.0015, 0.0015, 0.0022, 6));
+/* Geometrie riutilizzate (per mondo). */
+function GC(world, key, make) {
+  if (!world.geoCache) world.geoCache = new Map();
+  if (!world.geoCache.has(key)) world.geoCache.set(key, trackGeo(world, make()));
+  return world.geoCache.get(key);
 }
 
-function buildServo(world, mats, kind) {
+function rbox(world, w, h, d, r, seg) {
+  const rr = Math.max(0.0001, Math.min(r, Math.min(w, h, d) / 2 - 0.00005));
+  const key = "rb" + [w, h, d, rr, seg || 2].map((n) => n.toFixed(5)).join(",");
+  return GC(world, key, () => new RoundedBoxGeometry(w, h, d, seg || 2, rr));
+}
+
+function cyl(world, r1, r2, h, seg, open) {
+  const key = "cy" + [r1, r2, h, seg].join(",") + (open ? "o" : "");
+  return GC(world, key, () => new THREE.CylinderGeometry(r1, r2, h, seg, 1, !!open));
+}
+
+const AXIS_ROT = {
+  "+y": [0, 0, 0],
+  "-y": [Math.PI, 0, 0],
+  "+x": [0, 0, -Math.PI / 2],
+  "-x": [0, 0, Math.PI / 2],
+  "+z": [Math.PI / 2, 0, 0],
+  "-z": [-Math.PI / 2, 0, 0],
+};
+
+/* Vite a brugola (testa cilindrica con esagono incassato). axis = direzione verso cui guarda la testa. */
+function screw(parent, world, mats, pos, axis, size) {
+  const s = size || 1;
   const g = new THREE.Group();
+  g.position.set(pos[0], pos[1], pos[2]);
+  const r = AXIS_ROT[axis || "+y"];
+  g.rotation.set(r[0], r[1], r[2]);
+  addMesh(g, world, cyl(world, 0.0014 * s, 0.0014 * s, 0.0013 * s, 12), mats.steel, [0, 0.00065 * s, 0], null, "none");
+  addMesh(g, world, cyl(world, 0.00072 * s, 0.00072 * s, 0.0003, 6), mats.socket, [0, 0.0013 * s + 0.0001, 0], null, "none");
+  parent.add(g);
+  return g;
+}
+
+function washer(parent, world, mats, pos, axis, r) {
+  const g = new THREE.Group();
+  g.position.set(pos[0], pos[1], pos[2]);
+  const rr = AXIS_ROT[axis || "+y"];
+  g.rotation.set(rr[0], rr[1], rr[2]);
+  addMesh(g, world, cyl(world, r || 0.0028, r || 0.0028, 0.0006, 16), mats.steel, [0, 0.0003, 0], null, "none");
+  parent.add(g);
+  return g;
+}
+
+/* Piastra estrusa nel piano (z,y), spessore lungo x, centrata in x. */
+function plateZY(world, key, shape, thick) {
+  return GC(world, key, () => {
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: thick,
+      bevelEnabled: true,
+      bevelThickness: 0.0004,
+      bevelSize: 0.0004,
+      bevelSegments: 1,
+      curveSegments: 18,
+    });
+    geo.rotateY(-Math.PI / 2);
+    geo.translate(thick / 2, 0, 0);
+    scaleUv(geo, 9);
+    return geo;
+  });
+}
+
+function scaleUv(geo, s) {
+  const uv = geo.getAttribute("uv");
+  if (!uv) return;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * s, uv.getY(i) * s);
+  uv.needsUpdate = true;
+}
+
+/* Profilo a "orecchia": rettangolo z∈[z0,z1], y∈[-h,h] con estremità arrotondata attorno a (zc,0). */
+function earShape(z0, z1, h, zc, holeR, extraHoles) {
+  const s = new THREE.Shape();
+  if (zc >= z1 - 1e-6) {
+    s.moveTo(z0, -h);
+    s.lineTo(zc, -h);
+    s.absarc(zc, 0, h, -Math.PI / 2, Math.PI / 2, false);
+    s.lineTo(z0, h);
+    s.lineTo(z0, -h);
+  } else {
+    s.moveTo(z1, h);
+    s.lineTo(zc, h);
+    s.absarc(zc, 0, h, Math.PI / 2, Math.PI * 1.5, false);
+    s.lineTo(z1, -h);
+    s.lineTo(z1, h);
+  }
+  if (holeR) {
+    const hole = new THREE.Path();
+    hole.absarc(zc, 0, holeR, 0, Math.PI * 2, true);
+    s.holes.push(hole);
+  }
+  (extraHoles || []).forEach((hh) => {
+    const p = new THREE.Path();
+    if (hh.len) {
+      const r = hh.r;
+      p.moveTo(hh.z - hh.len / 2, hh.y - r);
+      p.lineTo(hh.z + hh.len / 2, hh.y - r);
+      p.absarc(hh.z + hh.len / 2, hh.y, r, -Math.PI / 2, Math.PI / 2, false);
+      p.lineTo(hh.z - hh.len / 2, hh.y + r);
+      p.absarc(hh.z - hh.len / 2, hh.y, r, Math.PI / 2, Math.PI * 1.5, false);
+    } else {
+      p.absarc(hh.z, hh.y, hh.r, 0, Math.PI * 2, true);
+    }
+    s.holes.push(p);
+  });
+  return s;
+}
+
+/* Servo: asse di uscita lungo +y locale nell'origine, corpo verso -y, lunghezza lungo z. */
+const SERVO_DIM = {
+  mg: { W: 0.0197, L: 0.0407, H: 0.03, shaftZ: 0.0103, flange: 0.0072, flY: -0.009, hornR: 0.0105, top: 0.0058 },
+  sg: { W: 0.0122, L: 0.0226, H: 0.0165, shaftZ: 0.0057, flange: 0.0047, flY: -0.0045, hornR: 0.0065, top: 0.0042 },
+};
+
+function buildServoBody(world, mats, kind) {
+  const d = SERVO_DIM[kind];
   const sg = kind === "sg";
-  const L = sg ? 0.023 : 0.0407;
-  const W = sg ? 0.012 : 0.0197;
-  const H = sg ? 0.022 : 0.036;
-  const body = trackGeo(world, new THREE.BoxGeometry(W, H, L));
-  addMesh(g, world, body, mats.servo, [0, -H / 2 + 0.004, 0]);
-  const flangeZ = L / 2 + 0.0035;
-  const fl = trackGeo(world, new THREE.BoxGeometry(W, 0.0024, 0.007));
-  addMesh(g, world, fl, mats.servo, [0, -0.002, flangeZ]);
-  addMesh(g, world, fl, mats.servo, [0, -0.002, -flangeZ]);
-  const cap = trackGeo(world, new THREE.BoxGeometry(W + 0.0004, 0.004, L * 0.55));
-  addMesh(g, world, cap, mats.aluDark, [0, 0.002, -L * 0.08]);
-  const shaft = trackGeo(world, new THREE.CylinderGeometry(0.003, 0.003, 0.005, 12));
-  addMesh(g, world, shaft, mats.brass, [0, 0.006, 0], [0, 0, 0], "none");
-  const disc = trackGeo(world, new THREE.CylinderGeometry(sg ? 0.007 : 0.01, sg ? 0.007 : 0.01, 0.002, 16));
-  const horn = addMesh(g, world, disc, mats.horn, [0, 0.0082, 0]);
-  const arm = trackGeo(world, new THREE.BoxGeometry(sg ? 0.006 : 0.008, 0.0018, sg ? 0.022 : 0.032));
-  addMesh(g, world, arm, mats.horn, [0, 0.0082, 0], null, "none");
-  const arm2 = trackGeo(world, new THREE.BoxGeometry(sg ? 0.018 : 0.024, 0.0018, sg ? 0.006 : 0.008));
-  addMesh(g, world, arm2, mats.horn, [0, 0.0082, 0], null, "none");
-  const screw = trackGeo(world, new THREE.CylinderGeometry(0.0012, 0.0012, 0.003, 8));
-  addMesh(g, world, screw, mats.brass, [0, 0.0102, 0], null, "none");
-  const wire = trackGeo(world, new THREE.BoxGeometry(0.004, 0.003, 0.008));
-  addMesh(g, world, wire, mats.cable, [0, -H + 0.005, L / 2 - 0.002], null, "none");
+  const g = new THREE.Group();
+  const body = sg ? mats.servoBlue : mats.servo;
+  const zc = d.shaftZ - d.L / 2;
+  addMesh(g, world, rbox(world, d.W, d.H, d.L, 0.0011, 2), body, [0, -d.H / 2, zc]);
+  // flange con passacavi in gomma
+  addMesh(g, world, rbox(world, d.W, sg ? 0.0018 : 0.0025, d.L + d.flange * 2, 0.0006, 1), body, [0, d.flY, zc]);
+  const gromR = sg ? 0.0013 : 0.002;
+  [-1, 1].forEach((sz) => {
+    [-1, 1].forEach((sx) => {
+      if (sg && sx > 0) return;
+      const px = sg ? 0 : sx * d.W * 0.26;
+      const pz = zc + sz * (d.L / 2 + d.flange * 0.5);
+      addMesh(g, world, cyl(world, gromR, gromR, sg ? 0.0028 : 0.0042, 12), mats.rubber, [px, d.flY, pz], null, "none");
+      addMesh(g, world, cyl(world, gromR * 0.55, gromR * 0.55, sg ? 0.0031 : 0.0046, 10), mats.brass, [px, d.flY, pz], null, "none");
+    });
+  });
+  // corpo superiore a gradino e boss dell'albero
+  addMesh(g, world, rbox(world, d.W * 0.98, d.top, d.L * 0.62, 0.001, 2), body, [0, d.top / 2 - 0.0002, d.shaftZ - d.L * 0.31]);
+  addMesh(g, world, cyl(world, d.W * 0.34, d.W * 0.36, 0.0022, 20), body, [0, d.top + 0.0009, 0]);
+  addMesh(g, world, cyl(world, d.W * 0.13, d.W * 0.13, 0.0022, 14), mats.brass, [0, d.top + 0.0028, 0], null, "none");
+  // etichette sui due fianchi
+  const stickerGeo = GC(world, "stk" + kind, () => new THREE.PlaneGeometry(d.L * 0.86, d.H * 0.46));
+  const sm = sg ? mats.stickerSg : mats.stickerMg;
+  addMesh(g, world, stickerGeo, sm, [d.W / 2 + 0.00012, -d.H * 0.52, zc], [0, Math.PI / 2, 0], "none");
+  addMesh(g, world, stickerGeo, sm, [-d.W / 2 - 0.00012, -d.H * 0.52, zc], [0, -Math.PI / 2, 0], "none");
+  // uscita cavi (marrone, rosso, arancio)
+  const wz = zc - d.L / 2;
+  addMesh(g, world, rbox(world, d.W * 0.36, 0.0035, 0.004, 0.0008, 1), body, [0, -d.H + 0.003, wz - 0.0015], null, "none");
+  const wires = [mats.wireBrown, mats.wireRed, mats.wireOrange];
+  wires.forEach((m, i) => {
+    const x = (i - 1) * 0.0011;
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, -d.H + 0.003, wz - 0.003),
+      new THREE.Vector3(x, -d.H + 0.0015, wz - 0.008),
+      new THREE.Vector3(x * 1.4, -d.H - 0.004, wz - 0.011),
+    ]);
+    const geo = trackGeo(world, new THREE.TubeGeometry(curve, 8, 0.00055, 5, false));
+    addMesh(g, world, geo, m, null, null, "none");
+  });
   g.userData.kind = kind;
   return g;
 }
 
-function buildUBracket(world, mats, width, height, depth, thick) {
+/* Squadretta bianca (horn) a croce; si monta sul giunto distale. */
+function buildHorn(world, mats, kind) {
+  const d = SERVO_DIM[kind];
   const g = new THREE.Group();
-  const side = trackGeo(world, new THREE.BoxGeometry(thick, height, depth));
-  addMesh(g, world, side, mats.alu, [-width / 2, 0, 0]);
-  addMesh(g, world, side, mats.alu, [width / 2, 0, 0]);
-  const bot = trackGeo(world, new THREE.BoxGeometry(width + thick, thick, depth));
-  addMesh(g, world, bot, mats.alu, [0, -height / 2, 0]);
+  const y = d.top + 0.0045;
+  addMesh(g, world, cyl(world, d.hornR, d.hornR, 0.0018, 28), mats.horn, [0, y, 0]);
+  addMesh(g, world, cyl(world, d.W * 0.2, d.W * 0.2, 0.0034, 16), mats.horn, [0, y - 0.0012, 0], null, "none");
+  const n = 4;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.PI / 4;
+    addMesh(g, world, cyl(world, d.hornR * 0.11, d.hornR * 0.11, 0.0005, 8), mats.socket, [Math.cos(a) * d.hornR * 0.68, y + 0.0007, Math.sin(a) * d.hornR * 0.68], null, "none");
+  }
+  screw(g, world, mats, [0, y + 0.0009, 0], "+y", kind === "sg" ? 0.7 : 1);
   return g;
 }
 
-function cableSeg(world, mats, parent, len, pos, rot) {
-  const geo = trackGeo(world, new THREE.CylinderGeometry(0.0018, 0.0018, len, 6));
-  const m = addMesh(parent, world, geo, mats.cable, pos, rot || [0, 0, 0], "none");
-  return m;
+/* Fascio di cavi in guaina con fascette. */
+function sleeveCable(parent, world, mats, pts, r, ties) {
+  const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
+  const geo = trackGeo(world, new THREE.TubeGeometry(curve, Math.max(12, pts.length * 10), r, 8, false));
+  addMesh(parent, world, geo, mats.sleeve, null, null);
+  const tieGeo = GC(world, "tie" + r.toFixed(4), () => new THREE.TorusGeometry(r + 0.0004, 0.00055, 5, 14));
+  const zAxis = new THREE.Vector3(0, 0, 1);
+  (ties || []).forEach((t) => {
+    const p = curve.getPointAt(t);
+    const tan = curve.getTangentAt(t);
+    const m = new THREE.Mesh(tieGeo, mats.tie);
+    m.position.copy(p);
+    m.quaternion.setFromUnitVectors(zAxis, tan);
+    parent.add(m);
+    const head = new THREE.Mesh(rbox(world, 0.0022, 0.0018, 0.0026, 0.0004, 1), mats.tie);
+    head.position.copy(p).add(new THREE.Vector3(0, r + 0.0008, 0));
+    head.quaternion.copy(m.quaternion);
+    parent.add(head);
+  });
+  return curve;
+}
+
+/*
+ * Modulo di giunto (asse lungo x nell'origine del gruppo):
+ *  - prossimale (nel gruppo padre): servo con albero verso +x, orecchie con foro.
+ *  - distale (nel gruppo figlio): forcella esterna, horn bianco, cuscinetto sull'altro lato.
+ */
+const CLEVIS_X = 0.026;
+const EAR_X = 0.0215;
+const JR = 0.016;
+
+function proximalJoint(parent, world, mats, at, opts) {
+  const o = opts || {};
+  const servo = buildServoBody(world, mats, "mg");
+  // albero verso +x: rotazione z -90°, horn a x = CLEVIS_X - 0.0015
+  const hornTop = SERVO_DIM.mg.top + 0.0054;
+  servo.position.set(at[0] + (CLEVIS_X - 0.0016 - hornTop), at[1], at[2]);
+  servo.rotation.set(0, 0, -Math.PI / 2);
+  parent.add(servo);
+  // perno del cuscinetto sul retro
+  const backX = servo.position.x - SERVO_DIM.mg.H - 0.0002;
+  const pinLen = backX - (-CLEVIS_X + 0.0015);
+  if (pinLen > 0.0005) {
+    addMesh(parent, world, cyl(world, 0.0032, 0.0032, pinLen, 16), mats.steel, [backX - pinLen / 2, at[1], at[2]], AXIS_ROT["+x"], "none");
+  }
+  if (!o.noEars) {
+    const t = 0.0028;
+    const z0 = at[2] - (o.earLen || 0.042);
+    const key = "ear" + (o.earLen || 0.042);
+    const shape = earShape(z0 - at[2], 0, JR, 0, 0.0118, [{ z: -(o.earLen || 0.042) * 0.62, y: 0, r: 0.0045, len: (o.earLen || 0.042) * 0.32 }]);
+    const geo = plateZY(world, key, shape, t);
+    [-1, 1].forEach((sx) => {
+      addMesh(parent, world, geo, mats.alu, [sx * EAR_X, at[1], at[2]]);
+      // viti della flangia del servo
+      [-1, 1].forEach((sz) => {
+        screw(parent, world, mats, [sx * (EAR_X + t / 2 + 0.0004), at[1] + 0.0105 * sz, at[2] - 0.006], sx > 0 ? "+x" : "-x", 0.9);
+        screw(parent, world, mats, [sx * (EAR_X + t / 2 + 0.0004), at[1] + 0.0105 * sz, at[2] - 0.034], sx > 0 ? "+x" : "-x", 0.9);
+      });
+    });
+    // piastra di collegamento delle orecchie
+    addMesh(parent, world, rbox(world, EAR_X * 2 + t, 0.026, 0.003, 0.0008, 1), mats.alu, [at[0], at[1], z0 + 0.0015]);
+  }
+  return servo;
+}
+
+function distalJoint(parent, world, mats, opts) {
+  const o = opts || {};
+  const t = 0.003;
+  const len = o.len || 0.034;
+  const shape = earShape(0, len, JR, 0, 0, o.slot ? [{ z: len * 0.62, y: 0, r: 0.004, len: len * 0.35 }] : []);
+  const geo = plateZY(world, "clevis" + len + (o.slot ? "s" : ""), shape, t);
+  addMesh(parent, world, geo, mats.alu, [CLEVIS_X, 0, 0]);
+  addMesh(parent, world, geo, mats.alu, [-CLEVIS_X, 0, 0]);
+  // horn sul lato +x (interno) e viti visibili all'esterno
+  const horn = buildHorn(world, mats, "mg");
+  horn.rotation.set(0, 0, -Math.PI / 2);
+  horn.position.set(CLEVIS_X - t / 2 - 0.0016 - (SERVO_DIM.mg.top + 0.0054), 0, 0);
+  parent.add(horn);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    screw(parent, world, mats, [CLEVIS_X + t / 2 + 0.0002, Math.cos(a) * 0.0072, Math.sin(a) * 0.0072], "+x", 0.85);
+  }
+  addMesh(parent, world, cyl(world, 0.0042, 0.0042, 0.0012, 20), mats.aluOrange, [CLEVIS_X + t / 2 + 0.0006, 0, 0], AXIS_ROT["+x"]);
+  screw(parent, world, mats, [CLEVIS_X + t / 2 + 0.0012, 0, 0], "+x", 1.1);
+  // cuscinetto flangiato sul lato -x
+  addMesh(parent, world, cyl(world, 0.0068, 0.0068, 0.0016, 24), mats.steel, [-CLEVIS_X - t / 2 - 0.0008, 0, 0], AXIS_ROT["-x"]);
+  addMesh(parent, world, cyl(world, 0.0046, 0.0046, 0.0019, 20), mats.socket, [-CLEVIS_X - t / 2 - 0.0008, 0, 0], AXIS_ROT["-x"], "none");
+  addMesh(parent, world, cyl(world, 0.0034, 0.0034, 0.0024, 6), mats.steel, [-CLEVIS_X - t / 2 - 0.0012, 0, 0], AXIS_ROT["-x"], "none");
+  if (!o.noWeb) {
+    addMesh(parent, world, rbox(world, CLEVIS_X * 2 + t, 0.026, 0.003, 0.0008, 1), mats.alu, [0, 0, len - 0.0015]);
+  }
+}
+
+/* Tratto di braccio: tubo quadro in alluminio + copertura in carbonio + cavi. */
+function linkTube(parent, world, mats, z0, z1, side) {
+  const len = z1 - z0;
+  if (len < 0.006) return;
+  const zc = (z0 + z1) / 2;
+  addMesh(parent, world, rbox(world, 0.03, 0.022, len, 0.0026, 2), mats.alu, [0, 0, zc]);
+  // canalina inferiore scura
+  addMesh(parent, world, rbox(world, 0.018, 0.0016, len * 0.92, 0.0006, 1), mats.aluBlack, [0, -0.0112, zc], null, "none");
+  // copertura in carbonio con viti
+  addMesh(parent, world, rbox(world, 0.026, 0.0016, len * 0.9, 0.0007, 1), mats.carbon, [0, 0.0118, zc]);
+  [-1, 1].forEach((sz) => {
+    [-1, 1].forEach((sx) => {
+      screw(parent, world, mats, [sx * 0.0095, 0.0126, zc + sz * len * 0.4], "+y", 0.8);
+    });
+  });
+  // fascio cavi sul fianco
+  const x = (side || 1) * 0.0175;
+  sleeveCable(parent, world, mats, [
+    [x, -0.004, z1 + 0.004],
+    [x + 0.0005 * side, -0.006, zc + len * 0.25],
+    [x + 0.0005 * side, -0.006, zc - len * 0.25],
+    [x, -0.004, z0 - 0.004],
+  ], 0.0024, [0.18, 0.5, 0.82]);
 }
 
 function buildArm(world, mats, config) {
   const { L1, L2, L3, baseH } = config;
   const root = new THREE.Group();
+  const joint = (g) => {
+    g.userData.joint = true;
+    return g;
+  };
 
-  const baseFixed = new THREE.Group();
+  /* --- base fissa --- */
+  const baseFixed = joint(new THREE.Group());
   root.add(baseFixed);
-  const foot = trackGeo(world, new THREE.CylinderGeometry(0.07, 0.074, 0.01, 32));
-  addMesh(baseFixed, world, foot, mats.rubber, [0, 0.005, 0], null, "recv");
-  const plate = trackGeo(world, new THREE.CylinderGeometry(0.06, 0.06, 0.006, 32));
-  addMesh(baseFixed, world, plate, mats.aluDark, [0, 0.012, 0]);
-  const race = trackGeo(world, new THREE.TorusGeometry(0.048, 0.0045, 8, 24));
-  addMesh(baseFixed, world, race, mats.brass, [0, 0.016, 0], [Math.PI / 2, 0, 0]);
-  const boltGeo = bolt(world, mats);
+  addMesh(baseFixed, world, rbox(world, 0.16, 0.012, 0.16, 0.0035, 3), mats.aluBlack, [0, 0.006, 0], null, "recv");
+  [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(([sx, sz]) => {
+    washer(baseFixed, world, mats, [sx * 0.068, 0.012, sz * 0.068], "+y", 0.0034);
+    screw(baseFixed, world, mats, [sx * 0.068, 0.0126, sz * 0.068], "+y", 1.4);
+  });
+  addMesh(baseFixed, world, cyl(world, 0.058, 0.06, 0.010, 48, true), mats.alu, [0, 0.017, 0]);
+  addMesh(baseFixed, world, GC(world, "ringTop", () => new THREE.RingGeometry(0.038, 0.058, 48, 1)), mats.aluTurned, [0, 0.022, 0], [-Math.PI / 2, 0, 0]);
   for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    addMesh(baseFixed, world, boltGeo, mats.brass, [Math.cos(a) * 0.062, 0.016, Math.sin(a) * 0.062], null, "none");
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    screw(baseFixed, world, mats, [Math.cos(a) * 0.052, 0.022, Math.sin(a) * 0.052], "+y", 1);
   }
+  addMesh(baseFixed, world, GC(world, "gap", () => new THREE.TorusGeometry(0.0378, 0.0008, 6, 48)), mats.socket, [0, 0.0222, 0], [Math.PI / 2, 0, 0], "none");
+  // targhetta e LED di stato
+  const lab = addMesh(baseFixed, world, GC(world, "labelPlane", () => new THREE.PlaneGeometry(0.056, 0.014)), mats.label, [0.069, 0.01215, 0.0], [-Math.PI / 2, Math.PI / 2, 0, "YXZ"], "none");
+  lab.receiveShadow = true;
+  addMesh(baseFixed, world, cyl(world, 0.0045, 0.0048, 0.0016, 20), mats.steel, [0.064, 0.0128, 0.052], null, "none");
+  const ledGeo = GC(world, "led", () => new THREE.SphereGeometry(0.0031, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2));
+  addMesh(baseFixed, world, ledGeo, mats.led, [0.064, 0.0136, 0.052], null, "none");
+  // cavo di alimentazione che esce sul tappetino
+  addMesh(baseFixed, world, rbox(world, 0.009, 0.0075, 0.012, 0.002, 2), mats.rubber, [-0.02, 0.006, -0.083]);
+  sleeveCable(baseFixed, world, mats, [
+    [-0.02, 0.0045, -0.088],
+    [-0.022, 0.003, -0.11],
+    [-0.04, 0.0028, -0.15],
+    [-0.09, 0.0028, -0.19],
+    [-0.2, 0.0028, -0.25],
+    [-0.45, 0.0028, -0.33],
+  ], 0.0028, []);
 
-  const base = new THREE.Group();
+  /* --- base rotante --- */
+  const base = joint(new THREE.Group());
   root.add(base);
-  const turn = trackGeo(world, new THREE.CylinderGeometry(0.052, 0.052, 0.007, 28));
-  addMesh(base, world, turn, mats.alu, [0, 0.02, 0]);
-  const hub = trackGeo(world, new THREE.CylinderGeometry(0.016, 0.016, 0.012, 16));
-  addMesh(base, world, hub, mats.aluDark, [0, 0.028, 0]);
+  addMesh(base, world, cyl(world, 0.036, 0.036, 0.009, 40, true), mats.alu, [0, 0.0265, 0]);
+  addMesh(base, world, GC(world, "turnCap", () => new THREE.CircleGeometry(0.036, 40)), mats.aluTurned, [0, 0.031, 0], [-Math.PI / 2, 0, 0]);
+  addMesh(base, world, GC(world, "turnRing", () => new THREE.TorusGeometry(0.036, 0.0012, 6, 40)), mats.aluOrange, [0, 0.031, 0], [Math.PI / 2, 0, 0], "none");
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    screw(base, world, mats, [Math.cos(a) * 0.03, 0.031, Math.sin(a) * 0.03], "+y", 0.9);
+  }
+  // torretta: due spalle verticali con foro e alleggerimento
+  const towerH = Math.max(0.012, baseH - 0.031);
+  const tShape = new THREE.Shape();
+  const zf = 0.018, zb = -0.038;
+  tShape.moveTo(zb, -towerH);
+  tShape.lineTo(zf, -towerH);
+  tShape.lineTo(zf, 0);
+  tShape.absarc(0, 0, zf, 0, Math.PI, false);
+  tShape.lineTo(zb, 0);
+  tShape.lineTo(zb, -towerH);
+  const th = new THREE.Path();
+  th.absarc(0, 0, 0.0118, 0, Math.PI * 2, true);
+  tShape.holes.push(th);
+  if (towerH > 0.03) {
+    const lh = new THREE.Path();
+    lh.absarc(-0.012, -towerH * 0.55, Math.min(0.009, towerH * 0.2), 0, Math.PI * 2, true);
+    tShape.holes.push(lh);
+  }
+  const towerGeo = plateZY(world, "tower" + towerH.toFixed(4), tShape, 0.0034);
+  addMesh(base, world, towerGeo, mats.alu, [EAR_X, baseH, 0]);
+  addMesh(base, world, towerGeo, mats.alu, [-EAR_X, baseH, 0]);
+  addMesh(base, world, rbox(world, EAR_X * 2 + 0.0034, 0.004, zf - zb, 0.001, 1), mats.aluBlack, [0, 0.033, (zf + zb) / 2]);
+  addMesh(base, world, rbox(world, EAR_X * 2 + 0.0034, Math.max(0.008, towerH - 0.02), 0.003, 0.0008, 1), mats.alu, [0, 0.031 + Math.max(0.008, towerH - 0.02) / 2 + 0.002, zb + 0.0015]);
+  [-1, 1].forEach((sx) => {
+    [0.012, -0.03].forEach((z) => screw(base, world, mats, [sx * (EAR_X + 0.0021), 0.037, z], sx > 0 ? "+x" : "-x", 0.9));
+    screw(base, world, mats, [sx * (EAR_X + 0.0021), baseH + 0.0105, -0.006], sx > 0 ? "+x" : "-x", 0.9);
+    screw(base, world, mats, [sx * (EAR_X + 0.0021), baseH - 0.0105, -0.006], sx > 0 ? "+x" : "-x", 0.9);
+  });
+  proximalJoint(base, world, mats, [0, baseH, 0], { noEars: true });
+  sleeveCable(base, world, mats, [
+    [0.034, baseH - 0.006, 0.004],
+    [0.036, baseH - 0.022, -0.01],
+    [0.03, 0.045, -0.034],
+    [0.012, 0.036, -0.045],
+    [0.0, 0.032, -0.03],
+  ], 0.0024, [0.5]);
 
-  const yawServo = buildServo(world, mats, "mg");
-  yawServo.position.set(0, 0.038, -0.012);
-  yawServo.rotation.set(0, 0, 0);
-  base.add(yawServo);
-
-  const column = trackGeo(world, new THREE.BoxGeometry(0.036, baseH - 0.03, 0.036));
-  addMesh(base, world, column, mats.alu, [0, 0.03 + (baseH - 0.03) / 2, 0]);
-
-  const shoulder = new THREE.Group();
+  /* --- spalla / braccio --- */
+  const shoulder = joint(new THREE.Group());
   shoulder.position.set(0, baseH, 0);
   base.add(shoulder);
-
-  const shoulderBracket = buildUBracket(world, mats, 0.046, 0.046, 0.05, 0.0035);
-  shoulderBracket.position.set(0, 0, 0);
-  shoulder.add(shoulderBracket);
-
-  const sServoA = buildServo(world, mats, "mg");
-  sServoA.position.set(-0.026, 0, 0);
-  sServoA.rotation.set(0, 0, Math.PI / 2);
-  shoulder.add(sServoA);
-  const sServoB = buildServo(world, mats, "mg");
-  sServoB.position.set(0.026, 0, 0);
-  sServoB.rotation.set(0, Math.PI, -Math.PI / 2);
-  shoulder.add(sServoB);
-
   const upper = new THREE.Group();
   shoulder.add(upper);
-  const beamH = 0.026;
-  const beamT = 0.0032;
-  const beam = trackGeo(world, new THREE.BoxGeometry(beamT, beamH, L1 + 0.01));
-  addMesh(upper, world, beam, mats.alu, [-0.016, 0, L1 / 2]);
-  addMesh(upper, world, beam, mats.alu, [0.016, 0, L1 / 2]);
-  const rib = trackGeo(world, new THREE.BoxGeometry(0.028, 0.0024, L1 * 0.7));
-  addMesh(upper, world, rib, mats.aluDark, [0, -0.01, L1 / 2]);
-  for (let i = 1; i <= 3; i++) {
-    const standoff = trackGeo(world, new THREE.CylinderGeometry(0.0025, 0.0025, 0.032, 8));
-    addMesh(upper, world, standoff, mats.brass, [0, 0, (L1 * i) / 4], [0, 0, Math.PI / 2], "none");
-  }
-  cableSeg(world, mats, upper, L1 * 0.85, [0.02, -0.012, L1 / 2], [Math.PI / 2, 0, 0]);
-  cableSeg(world, mats, upper, L1 * 0.85, [0.023, -0.012, L1 / 2], [Math.PI / 2, 0, 0]);
+  distalJoint(upper, world, mats, { len: 0.036, slot: true });
+  linkTube(upper, world, mats, 0.036, L1 - 0.042, 1);
+  proximalJoint(upper, world, mats, [0, 0, L1]);
+  sleeveCable(upper, world, mats, [
+    [0.0175, -0.004, 0.04],
+    [0.03, -0.006, 0.022],
+    [0.034, -0.006, 0.004],
+  ], 0.0024, []);
 
-  const elbow = new THREE.Group();
+  /* --- gomito / avambraccio --- */
+  const elbow = joint(new THREE.Group());
   elbow.position.set(0, 0, L1);
   upper.add(elbow);
-  const eBr = buildUBracket(world, mats, 0.04, 0.04, 0.042, 0.003);
-  elbow.add(eBr);
-  const eServo = buildServo(world, mats, "mg");
-  eServo.position.set(-0.023, 0, 0);
-  eServo.rotation.set(0, 0, Math.PI / 2);
-  elbow.add(eServo);
-
   const fore = new THREE.Group();
   elbow.add(fore);
-  const beam2 = trackGeo(world, new THREE.BoxGeometry(beamT, 0.022, L2 + 0.008));
-  addMesh(fore, world, beam2, mats.alu, [-0.013, 0, L2 / 2]);
-  addMesh(fore, world, beam2, mats.alu, [0.013, 0, L2 / 2]);
-  const rib2 = trackGeo(world, new THREE.BoxGeometry(0.022, 0.002, L2 * 0.65));
-  addMesh(fore, world, rib2, mats.aluDark, [0, -0.008, L2 / 2]);
-  cableSeg(world, mats, fore, L2 * 0.8, [0.017, -0.01, L2 / 2], [Math.PI / 2, 0, 0]);
+  distalJoint(fore, world, mats, { len: 0.034, slot: true });
+  linkTube(fore, world, mats, 0.034, L2 - 0.042, -1);
+  proximalJoint(fore, world, mats, [0, 0, L2]);
+  sleeveCable(fore, world, mats, [
+    [-0.0175, -0.004, 0.038],
+    [-0.03, -0.006, 0.022],
+    [-0.034, -0.006, 0.004],
+  ], 0.0024, []);
 
-  const wrist = new THREE.Group();
+  /* --- polso con servo di rotazione --- */
+  const wrist = joint(new THREE.Group());
   wrist.position.set(0, 0, L2);
   fore.add(wrist);
-  const wBr = buildUBracket(world, mats, 0.034, 0.032, 0.034, 0.0028);
-  wrist.add(wBr);
-  const wServo = buildServo(world, mats, "mg");
-  wServo.position.set(-0.02, 0, 0);
-  wServo.rotation.set(0, 0, Math.PI / 2);
-  wrist.add(wServo);
+  distalJoint(wrist, world, mats, { len: 0.05, noWeb: true });
+  addMesh(wrist, world, rbox(world, CLEVIS_X * 2 + 0.003, 0.003, 0.034, 0.0008, 1), mats.alu, [0, -0.0155, 0.031]);
+  const rServo = buildServoBody(world, mats, "mg");
+  const rollHornZ = 0.05;
+  rServo.rotation.set(Math.PI / 2, 0, 0);
+  rServo.position.set(0, 0, rollHornZ - (SERVO_DIM.mg.top + 0.0054));
+  wrist.add(rServo);
+  [-1, 1].forEach((sx) => {
+    addMesh(wrist, world, rbox(world, CLEVIS_X - 0.0115, 0.008, 0.012, 0.0008, 1), mats.aluBlack, [sx * (0.0099 + (CLEVIS_X - 0.0115) / 2 + 0.0002), 0.006, 0.03]);
+    screw(wrist, world, mats, [sx * (CLEVIS_X + 0.0017), 0.006, 0.03], sx > 0 ? "+x" : "-x", 0.9);
+    screw(wrist, world, mats, [sx * (CLEVIS_X + 0.0017), -0.0155, 0.042], sx > 0 ? "+x" : "-x", 0.8);
+  });
 
-  const roll = new THREE.Group();
+  const roll = joint(new THREE.Group());
   wrist.add(roll);
-  const rollServo = buildServo(world, mats, "mg");
-  rollServo.position.set(0, 0, 0.012);
-  rollServo.rotation.set(Math.PI / 2, 0, 0);
-  roll.add(rollServo);
-  const flange = trackGeo(world, new THREE.CylinderGeometry(0.016, 0.016, 0.004, 16));
-  addMesh(roll, world, flange, mats.alu, [0, 0, 0.028], [Math.PI / 2, 0, 0]);
+  const rHorn = buildHorn(world, mats, "mg");
+  rHorn.rotation.set(Math.PI / 2, 0, 0);
+  rHorn.position.set(0, 0, rollHornZ - (SERVO_DIM.mg.top + 0.0054));
+  roll.add(rHorn);
+  addMesh(roll, world, cyl(world, 0.0145, 0.0145, 0.0035, 32), mats.aluOrange, [0, 0, rollHornZ + 0.00175], AXIS_ROT["+z"]);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    screw(roll, world, mats, [Math.cos(a) * 0.0105, Math.sin(a) * 0.0105, rollHornZ + 0.0035], "+z", 0.8);
+  }
 
+  /* --- pinza a slitte parallele (SG90) --- */
   const gripRoot = new THREE.Group();
-  gripRoot.position.set(0, 0, 0.034);
   roll.add(gripRoot);
-  const gServo = buildServo(world, mats, "sg");
-  gServo.position.set(0, 0.016, 0.01);
-  gServo.rotation.set(0, 0, 0);
-  gripRoot.add(gServo);
-  const palm = trackGeo(world, new THREE.BoxGeometry(0.028, 0.014, 0.016));
-  addMesh(gripRoot, world, palm, mats.aluDark, [0, 0, 0.012]);
-  const rod = trackGeo(world, new THREE.CylinderGeometry(0.0015, 0.0015, 0.05, 8));
-  addMesh(gripRoot, world, rod, mats.brass, [0, 0, 0.03], [0, 0, Math.PI / 2], "none");
+  const gz0 = rollHornZ + 0.0035;
+  const plateZ1 = Math.max(gz0 + 0.02, L3 - 0.016);
+  const plateLen = plateZ1 - gz0;
+  const plateW = 0.082;
+  addMesh(gripRoot, world, rbox(world, 0.046, 0.03, 0.0028, 0.0009, 1), mats.alu, [0, 0, gz0 + 0.0014]);
+  addMesh(gripRoot, world, rbox(world, plateW, 0.0024, plateLen, 0.0008, 1), mats.carbon, [0, 0.0135, gz0 + plateLen / 2]);
+  addMesh(gripRoot, world, rbox(world, plateW, 0.0024, plateLen, 0.0008, 1), mats.carbon, [0, -0.0135, gz0 + plateLen / 2]);
+  [[-1, 1], [1, 1], [-1, -1], [1, -1]].forEach(([sx, sz]) => {
+    const px = sx * (plateW / 2 - 0.004);
+    const pz = gz0 + plateLen / 2 + sz * (plateLen / 2 - 0.004);
+    addMesh(gripRoot, world, cyl(world, 0.0022, 0.0022, 0.0246, 6), mats.brass, [px, 0, pz], null, "none");
+    screw(gripRoot, world, mats, [px, 0.0147, pz], "+y", 0.8);
+    screw(gripRoot, world, mats, [px, -0.0147, pz], "-y", 0.8);
+  });
+  const sg = buildServoBody(world, mats, "sg");
+  const gearZ = gz0 + 0.009;
+  sg.position.set(-0.0062, 0.0122 - (SERVO_DIM.sg.top + 0.0006), gearZ);
+  sg.rotation.set(0, Math.PI / 2, 0);
+  gripRoot.add(sg);
+  // guide in acciaio
+  const railY = 0.0178;
+  const railZ = [plateZ1 - 0.0105, plateZ1 - 0.0045];
+  railZ.forEach((z) => {
+    addMesh(gripRoot, world, cyl(world, 0.0012, 0.0012, plateW - 0.004, 12), mats.steel, [0, railY, z], AXIS_ROT["+x"], "none");
+  });
+  [-1, 1].forEach((sx) => {
+    addMesh(gripRoot, world, rbox(world, 0.004, 0.0075, 0.012, 0.0008, 1), mats.aluBlack, [sx * (plateW / 2 - 0.002), railY - 0.0006, plateZ1 - 0.0075]);
+  });
+  // ingranaggi
+  const gearGeo = GC(world, "gear", () => gearGeometry(0.0062, 14, 0.0026));
+  const pinion = joint(new THREE.Group());
+  pinion.position.set(-0.0062, 0.0148, gearZ);
+  gripRoot.add(pinion);
+  addMesh(pinion, world, gearGeo, mats.brass, [0, 0, 0]);
+  screw(pinion, world, mats, [0, 0.0026, 0], "+y", 0.7);
+  const gear2 = joint(new THREE.Group());
+  gear2.position.set(0.0062, 0.0148, gearZ);
+  gripRoot.add(gear2);
+  addMesh(gear2, world, gearGeo, mats.brass, [0, 0, 0]);
+  screw(gear2, world, mats, [0, 0.0026, 0], "+y", 0.7);
 
-  const jawL = new THREE.Group();
-  const jawR = new THREE.Group();
+  const jawL = joint(new THREE.Group());
+  const jawR = joint(new THREE.Group());
   gripRoot.add(jawL);
   gripRoot.add(jawR);
-  const jawArm = trackGeo(world, new THREE.BoxGeometry(0.005, 0.012, L3 - 0.02));
-  addMesh(jawL, world, jawArm, mats.alu, [0, 0, (L3 - 0.02) / 2 + 0.004]);
-  addMesh(jawR, world, jawArm, mats.alu, [0, 0, (L3 - 0.02) / 2 + 0.004]);
-  const tip = trackGeo(world, new THREE.BoxGeometry(0.004, 0.016, 0.018));
-  addMesh(jawL, world, tip, mats.alu, [0.002, 0, L3 - 0.012]);
-  addMesh(jawR, world, tip, mats.alu, [-0.002, 0, L3 - 0.012]);
-  const pad = trackGeo(world, new THREE.BoxGeometry(0.003, 0.014, 0.016));
-  addMesh(jawL, world, pad, mats.pad, [0.0045, 0, L3 - 0.012], null, "none");
-  addMesh(jawR, world, pad, mats.pad, [-0.0045, 0, L3 - 0.012], null, "none");
+  const fingerZ0 = plateZ1 - 0.001;
+  const fingerZ1 = L3 + 0.012;
+  const fLen = Math.max(0.012, fingerZ1 - fingerZ0);
+  const padLen = Math.min(0.022, fLen - 0.002);
+  [[jawL, 1], [jawR, -1]].forEach(([jaw, s]) => {
+    // s = +1: dita a sinistra (x negativa), faccia interna in x=0
+    const carriageX = -s * 0.0075;
+    addMesh(jaw, world, rbox(world, 0.008, 0.006, 0.014, 0.001, 1), mats.alu, [carriageX, railY, plateZ1 - 0.0075]);
+    addMesh(jaw, world, rbox(world, 0.006, 0.0075, 0.012, 0.001, 1), mats.alu, [-s * 0.0047, railY - 0.0008, plateZ1 + 0.003]);
+    const finger = addMesh(jaw, world, rbox(world, 0.0036, 0.034, fLen, 0.0012, 2), mats.alu, [-s * 0.0049, 0.0022, fingerZ0 + fLen / 2]);
+    finger.castShadow = true;
+    addMesh(jaw, world, rbox(world, 0.003, 0.026, padLen, 0.001, 2), mats.pad, [-s * 0.0016, 0.0005, fingerZ1 - 0.001 - padLen / 2]);
+    screw(jaw, world, mats, [-s * 0.0068, 0.012, fingerZ0 + fLen * 0.55], s > 0 ? "-x" : "+x", 0.75);
+    screw(jaw, world, mats, [-s * 0.0068, -0.009, fingerZ0 + fLen * 0.55], s > 0 ? "-x" : "+x", 0.75);
+    screw(jaw, world, mats, [carriageX, railY + 0.003, plateZ1 - 0.0075], "+y", 0.7);
+  });
 
   const ee = new THREE.Group();
   ee.position.set(0, 0, L3);
   gripRoot.add(ee);
 
-  return {
-    root,
-    base,
-    shoulder,
-    elbow,
-    wrist,
-    roll,
-    jawL,
-    jawR,
-    ee,
-    gripRoot,
-    upper,
-    fore,
-  };
+  root.updateMatrixWorld(true);
+  [baseFixed, base, shoulder, elbow, wrist, roll, pinion, gear2, jawL, jawR].forEach((g) => flattenGroup(world, g));
+
+  const parts = { root, base, shoulder, elbow, wrist, roll, jawL, jawR, ee, gripRoot, upper, fore, pinion, gear2 };
+  return parts;
+}
+
+function gearGeometry(r, teeth, thick) {
+  const s = new THREE.Shape();
+  const rr = r * 0.82;
+  const ro = r * 1.08;
+  const n = teeth * 4;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const ph = i % 4;
+    const rad = ph === 1 || ph === 2 ? ro : rr;
+    const x = Math.cos(a) * rad;
+    const y = Math.sin(a) * rad;
+    if (i === 0) s.moveTo(x, y);
+    else s.lineTo(x, y);
+  }
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, r * 0.22, 0, Math.PI * 2, true);
+  s.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(s, { depth: thick, bevelEnabled: false, curveSegments: 6 });
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+/* Unisce le mesh rigide di ogni giunto per materiale: meno draw call su iPhone. */
+function flattenGroup(world, group) {
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map();
+  const remove = [];
+  group.traverse((obj) => {
+    if (obj === group || !obj.isMesh) return;
+    let p = obj.parent;
+    while (p && p !== group) {
+      if (p.userData.joint) return;
+      p = p.parent;
+    }
+    const m = new THREE.Matrix4().multiplyMatrices(inv, obj.matrixWorld);
+    let geo = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
+    Object.keys(geo.attributes).forEach((k) => {
+      if (k !== "position" && k !== "normal" && k !== "uv") geo.deleteAttribute(k);
+    });
+    if (!geo.getAttribute("uv")) {
+      geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 2), 2));
+    }
+    geo.clearGroups();
+    geo.applyMatrix4(m);
+    const key = obj.material.uuid;
+    if (!buckets.has(key)) buckets.set(key, { mat: obj.material, cast: false, recv: false, list: [] });
+    const b = buckets.get(key);
+    b.cast = b.cast || obj.castShadow;
+    b.recv = b.recv || obj.receiveShadow;
+    b.list.push(geo);
+    remove.push(obj);
+  });
+  remove.forEach((obj) => obj.parent && obj.parent.remove(obj));
+  buckets.forEach((b) => {
+    const merged = mergeGeometries(b.list, false);
+    b.list.forEach((g) => g.dispose());
+    if (!merged) return;
+    trackGeo(world, merged);
+    const mesh = new THREE.Mesh(merged, b.mat);
+    mesh.castShadow = b.cast;
+    mesh.receiveShadow = b.recv;
+    group.add(mesh);
+  });
 }
 
 function applyJoints(parts, j) {
@@ -813,25 +1179,52 @@ function applyJoints(parts, j) {
   const open = 0.004 + (g / 100) * 0.022;
   parts.jawL.position.x = -open;
   parts.jawR.position.x = open;
+  if (parts.pinion) parts.pinion.rotation.y = open / 0.0062;
+  if (parts.gear2) parts.gear2.rotation.y = -open / 0.0062 + Math.PI / 14;
 }
 
 function jawWidth(gripper) {
   return 0.008 + (clampJoint("gripper", gripper) / 100) * 0.044;
 }
 
-/* ---------- Scene, luci, fisica oggetti ---------- */
+/* ---------- Scena, luci, fisica oggetti ---------- */
 
 function themePalette(dark) {
-  return {
-    bg: dark ? 0x0b0b12 : 0xf3f0fa,
-    hemiSky: dark ? 0xb8c0d8 : 0xffffff,
-    hemiGround: dark ? 0x2a2436 : 0xc8c0d4,
-    hemiInt: dark ? 0.55 : 0.85,
-    dirInt: dark ? 1.35 : 1.7,
-    fillInt: dark ? 0.35 : 0.5,
-    grid: dark ? 0x3a3a48 : 0xb8b4c6,
-    grid2: dark ? 0x262632 : 0xd8d4e4,
-  };
+  return dark
+    ? {
+        bgTop: "#23262d",
+        bgMid: "#16181d",
+        fog: 0x121418,
+        hemiSky: 0xb8c4e0,
+        hemiGround: 0x2a2018,
+        hemiInt: 0.18,
+        keyInt: 2.6,
+        rimInt: 0.9,
+        env: 0.5,
+        exposure: 1.0,
+      }
+    : {
+        bgTop: "#f1efeb",
+        bgMid: "#dedad3",
+        fog: 0xd3cec6,
+        hemiSky: 0xffffff,
+        hemiGround: 0x8f8170,
+        hemiInt: 0.35,
+        keyInt: 2.9,
+        rimInt: 0.8,
+        env: 0.85,
+        exposure: 1.0,
+      };
+}
+
+function hexCss(n) {
+  return "#" + n.toString(16).padStart(6, "0");
+}
+
+function applyBackdrop(world, pal) {
+  world.scene.background = TX.backdropTexture(pal.bgTop, pal.bgMid, hexCss(pal.fog));
+  if (!world.scene.fog) world.scene.fog = new THREE.Fog(pal.fog, 0.75, 2.6);
+  world.scene.fog.color.set(pal.fog);
 }
 
 function createPhysics() {
@@ -865,27 +1258,58 @@ function createPhysics() {
   return { world, floorMat, objMat, floor };
 }
 
-function makeObjectVisual(world, mats, kind, size, color) {
-  const mat = new THREE.MeshPhysicalMaterial({
-    color,
-    metalness: 0.12,
-    roughness: 0.45,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.3,
-    envMapIntensity: 0.9,
-  });
+/* Oggetti veri: blocco di faggio, scatolina di cartone, cilindro in alluminio, blocchetto d'acciaio. */
+function objectMaterial(world, look) {
+  let mat;
+  if (look === "wood") {
+    const w = TX.blockWood();
+    mat = new THREE.MeshStandardMaterial({ map: w.map, roughnessMap: w.rough, roughness: 0.75, metalness: 0 });
+  } else if (look === "cardboard") {
+    mat = new THREE.MeshStandardMaterial({ map: TX.cardboardTexture(), roughness: 0.85, metalness: 0 });
+  } else if (look === "alu") {
+    mat = new THREE.MeshStandardMaterial({ color: 0xdfe2e6, metalness: 1, roughness: 0.38, roughnessMap: TX.brushedTexture() });
+  } else {
+    mat = new THREE.MeshStandardMaterial({ color: 0xb4b9bf, metalness: 1, roughness: 0.34, roughnessMap: TX.brushedTexture() });
+  }
   world.dynMats.push(mat);
+  return mat;
+}
+
+function latheCylinder(r, h) {
+  const c = Math.min(0.0012, r * 0.12);
+  const pts = [
+    [0, -h / 2],
+    [r - c, -h / 2],
+    [r, -h / 2 + c],
+    [r, -h * 0.12],
+    [r - 0.0007, -h * 0.1],
+    [r - 0.0007, -h * 0.04],
+    [r, -h * 0.02],
+    [r, h / 2 - c],
+    [r - c, h / 2],
+    [r * 0.62, h / 2],
+    [r * 0.6, h / 2 - 0.0006],
+    [0, h / 2 - 0.0006],
+  ].map((p) => new THREE.Vector2(p[0], p[1]));
+  const geo = new THREE.LatheGeometry(pts, 40);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function makeObjectVisual(world, mats, kind, size, look) {
+  const mat = objectMaterial(world, look);
   let mesh;
   let shape;
   let mass;
   if (kind === "cyl") {
     const r = size * 0.5;
     const h = size * 1.25;
-    mesh = new THREE.Mesh(trackGeo(world, new THREE.CylinderGeometry(r, r, h, 18)), mat);
+    mesh = new THREE.Mesh(trackGeo(world, latheCylinder(r, h)), mat);
     shape = new CANNON.Cylinder(r, r, h, 10);
     mass = 0.045;
   } else {
-    mesh = new THREE.Mesh(trackGeo(world, new THREE.BoxGeometry(size, size, size)), mat);
+    const rad = look === "cardboard" ? 0.0007 : look === "wood" ? 0.0022 : 0.0011;
+    mesh = new THREE.Mesh(trackGeo(world, new RoundedBoxGeometry(size, size, size, 3, rad)), mat);
     shape = new CANNON.Box(new CANNON.Vec3(size / 2, size / 2, size / 2));
     mass = kind === "heavy" ? 0.22 : 0.04;
   }
@@ -896,14 +1320,16 @@ function makeObjectVisual(world, mats, kind, size, color) {
 
 function spawnObjects(world3, phys, mats) {
   const specs = [
-    { kind: "cube", size: 0.028, color: 0xff7a1a, pos: [0.1, 0.02, 0.2], mass: 0.045 },
-    { kind: "cube", size: 0.024, color: 0x4ea0ff, pos: [-0.11, 0.018, 0.16], mass: 0.03 },
-    { kind: "cyl", size: 0.026, color: 0x3dcb8a, pos: [0.16, 0.02, 0.1], mass: 0.05 },
-    { kind: "heavy", size: 0.032, color: 0x8b7cff, pos: [-0.05, 0.022, 0.24], mass: 0.22 },
+    { kind: "cube", size: 0.028, look: "wood", pos: [0.1, 0.02, 0.2], mass: 0.045 },
+    { kind: "cube", size: 0.024, look: "cardboard", pos: [-0.11, 0.018, 0.16], mass: 0.03 },
+    { kind: "cyl", size: 0.026, look: "alu", pos: [0.16, 0.02, 0.1], mass: 0.05 },
+    { kind: "heavy", size: 0.032, look: "steel", pos: [-0.05, 0.022, 0.24], mass: 0.22 },
   ];
+  const blobTex = TX.blobTexture();
+  const blobGeo = trackGeo(world3, new THREE.PlaneGeometry(1, 1));
   const list = [];
   specs.forEach((s) => {
-    const vis = makeObjectVisual(world3, mats, s.kind, s.size, s.color);
+    const vis = makeObjectVisual(world3, mats, s.kind, s.size, s.look);
     const body = new CANNON.Body({
       mass: s.mass,
       shape: vis.shape,
@@ -917,8 +1343,25 @@ function spawnObjects(world3, phys, mats) {
     body.collisionFilterMask = 1 | 2 | 4;
     phys.world.addBody(body);
     world3.scene.add(vis.mesh);
+    const blobMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      alphaMap: blobTex,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    world3.dynMats.push(blobMat);
+    const blob = new THREE.Mesh(blobGeo, blobMat);
+    blob.rotation.x = -Math.PI / 2;
+    blob.scale.setScalar(s.size * 2.1);
+    blob.renderOrder = 1;
+    world3.scene.add(blob);
     list.push({
       mesh: vis.mesh,
+      blob,
       body,
       mass: s.mass,
       size: s.size,
@@ -944,10 +1387,22 @@ function resetObjects(list) {
   });
 }
 
+function updateBlob(o) {
+  if (!o.blob) return;
+  const p = o.mesh.position;
+  o.blob.position.set(p.x, MAT_Y + 0.0003, p.z);
+  const lift = Math.max(0, p.y - o.size * 0.5);
+  const k = clamp(1 - lift / 0.12, 0, 1);
+  o.blob.material.opacity = 0.55 * k;
+  o.blob.scale.setScalar(o.size * (2.1 + lift * 8));
+  o.blob.visible = k > 0.02;
+}
+
 function syncObjects(list) {
   list.forEach((o) => {
     o.mesh.position.copy(o.body.position);
     o.mesh.quaternion.copy(o.body.quaternion);
+    updateBlob(o);
   });
 }
 
@@ -955,16 +1410,37 @@ function objectsAwake(list) {
   return list.some((o) => o.body.sleepState !== CANNON.Body.SLEEPING);
 }
 
+const MAT_Y = 0.0004;
+
+/* Qualità adattiva: [pixelRatio massimo, lato shadow map]. */
+const QUALITY = [
+  { pr: 1, shadow: 512 },
+  { pr: 1.5, shadow: 1024 },
+  { pr: 2, shadow: 1024 },
+];
+
+function applyQuality(world, level) {
+  const q = QUALITY[clamp(level, 0, QUALITY.length - 1)];
+  world.quality = level;
+  world.renderer.setPixelRatio(Math.min(q.pr, window.devicePixelRatio || 1));
+  if (world.key.shadow.mapSize.x !== q.shadow) {
+    world.key.shadow.mapSize.set(q.shadow, q.shadow);
+    if (world.key.shadow.map) {
+      world.key.shadow.map.dispose();
+      world.key.shadow.map = null;
+    }
+  }
+}
+
 function createWorld(container) {
   const dark = isDarkTheme();
   const pal = themePalette(dark);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(pal.bg);
 
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.02, 8);
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 8);
   if (cached.camPos) camera.position.copy(cached.camPos);
-  else camera.position.set(0.46, 0.28, 0.12);
-  camera.lookAt(0, 0.07, 0.1);
+  else camera.position.set(0.4, 0.27, 0.44);
+  camera.lookAt(0.02, 0.07, 0.1);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -973,19 +1449,22 @@ function createWorld(container) {
   });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = dark ? 1.0 : 1.12;
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = pal.exposure;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.className = "arm-canvas";
   container.appendChild(renderer.domElement);
+  const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 4);
 
   let envMap = null;
   try {
     const pmrem = new THREE.PMREMGenerator(renderer);
     const envScene = new RoomEnvironment();
-    envMap = pmrem.fromScene(envScene, 0.04).texture;
+    envMap = pmrem.fromScene(envScene, 0.035).texture;
     scene.environment = envMap;
+    scene.environmentIntensity = pal.env;
+    scene.environmentRotation.set(0, -0.6, 0);
     envScene.dispose();
     pmrem.dispose();
   } catch (err) {
@@ -994,23 +1473,25 @@ function createWorld(container) {
 
   const hemi = new THREE.HemisphereLight(pal.hemiSky, pal.hemiGround, pal.hemiInt);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xfff4e8, pal.dirInt);
-  dir.position.set(0.45, 0.85, 0.35);
-  dir.castShadow = true;
-  dir.shadow.mapSize.set(512, 512);
-  dir.shadow.camera.near = 0.05;
-  dir.shadow.camera.far = 2.5;
-  dir.shadow.camera.left = -0.5;
-  dir.shadow.camera.right = 0.5;
-  dir.shadow.camera.top = 0.5;
-  dir.shadow.camera.bottom = -0.5;
-  dir.shadow.bias = -0.0006;
-  dir.shadow.normalBias = 0.012;
-  dir.shadow.radius = 2.5;
-  scene.add(dir);
-  const fill = new THREE.DirectionalLight(0xc8d4ff, pal.fillInt);
-  fill.position.set(-0.4, 0.3, -0.3);
-  scene.add(fill);
+  const key = new THREE.DirectionalLight(0xfff0de, pal.keyInt);
+  key.position.set(0.42, 0.9, 0.38);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.camera.near = 0.2;
+  key.shadow.camera.far = 2.2;
+  key.shadow.camera.left = -0.42;
+  key.shadow.camera.right = 0.42;
+  key.shadow.camera.top = 0.42;
+  key.shadow.camera.bottom = -0.42;
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.004;
+  key.shadow.radius = 4;
+  key.target.position.set(0, 0, 0.06);
+  scene.add(key);
+  scene.add(key.target);
+  const rim = new THREE.DirectionalLight(0xcfdcff, pal.rimInt);
+  rim.position.set(-0.6, 0.35, -0.5);
+  scene.add(rim);
 
   const geoms = [];
   const world = {
@@ -1018,8 +1499,9 @@ function createWorld(container) {
     camera,
     renderer,
     hemi,
-    dir,
-    fill,
+    key,
+    dir: key,
+    fill: rim,
     envMap,
     geoms,
     dynMats: [],
@@ -1027,28 +1509,63 @@ function createWorld(container) {
     parts: null,
     armRoot: null,
     floor: null,
-    grid: null,
     marker: null,
     controls: null,
     pal,
     dark,
+    quality: 2,
   };
+  applyBackdrop(world, pal);
 
-  world.mats = makeMaterials(dark);
+  world.mats = makeMaterials(dark, maxAniso);
 
-  const floorGeo = trackGeo(world, new THREE.CircleGeometry(0.55, 48));
-  world.floor = addMesh(scene, world, floorGeo, world.mats.floor, [0, 0, 0], [-Math.PI / 2, 0, 0], "recv");
-
-  world.grid = new THREE.GridHelper(1.0, 20, pal.grid, pal.grid2);
-  world.grid.position.y = 0.001;
-  (Array.isArray(world.grid.material) ? world.grid.material : [world.grid.material]).forEach((m) => {
-    m.transparent = true;
-    m.opacity = dark ? 0.28 : 0.35;
+  /* Banco da lavoro in legno + tappetino da taglio */
+  const wood = TX.tableWood();
+  const woodMap = wood.map;
+  const woodRough = wood.rough;
+  [woodMap, woodRough].forEach((t) => {
+    t.repeat.set(8.75, 8.75);
+    t.anisotropy = maxAniso;
   });
-  scene.add(world.grid);
+  const tableMat = new THREE.MeshStandardMaterial({ map: woodMap, roughnessMap: woodRough, roughness: 0.85, metalness: 0 });
+  world.dynMats.push(tableMat);
+  world.floor = addMesh(scene, world, trackGeo(world, new THREE.PlaneGeometry(7, 7)), tableMat, [0, 0, 0], [-Math.PI / 2, 0, 0], "recv");
 
-  const markGeo = trackGeo(world, new THREE.RingGeometry(0.012, 0.018, 24));
-  world.marker = addMesh(scene, world, markGeo, world.mats.marker, [0, 0.002, 0], [-Math.PI / 2, 0, 0], "none");
+  const matTex = TX.cuttingMat(64, 48);
+  matTex.anisotropy = maxAniso;
+  const matMat = new THREE.MeshStandardMaterial({
+    map: matTex,
+    roughness: 0.82,
+    metalness: 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  world.dynMats.push(matMat);
+  addMesh(scene, world, trackGeo(world, new THREE.PlaneGeometry(0.64, 0.48)), matMat, [0.0, MAT_Y, 0.07], [-Math.PI / 2, 0, 0], "recv");
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x1b4136, roughness: 0.8 });
+  world.dynMats.push(edgeMat);
+  [[0, 0.07 + 0.24], [0, 0.07 - 0.24]].forEach(([x, z]) => addMesh(scene, world, trackGeo(world, new THREE.BoxGeometry(0.64, 0.0016, 0.0012)), edgeMat, [x, 0.0004, z], null, "recv"));
+  [-0.32, 0.32].forEach((x) => addMesh(scene, world, trackGeo(world, new THREE.BoxGeometry(0.0012, 0.0016, 0.48)), edgeMat, [x, 0.0004, 0.07], null, "recv"));
+
+  // ombra di contatto morbida sotto la base
+  const baseBlobMat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    alphaMap: TX.blobTexture(),
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  world.dynMats.push(baseBlobMat);
+  const baseBlob = addMesh(scene, world, trackGeo(world, new THREE.PlaneGeometry(0.24, 0.24)), baseBlobMat, [0, MAT_Y + 0.0002, 0], [-Math.PI / 2, 0, 0], "none");
+  baseBlob.renderOrder = 1;
+
+  const markGeo = trackGeo(world, new THREE.RingGeometry(0.009, 0.013, 32));
+  world.marker = addMesh(scene, world, markGeo, world.mats.marker, [0, 0.0012, 0], [-Math.PI / 2, 0, 0], "none");
+  world.marker.renderOrder = 2;
   world.marker.visible = false;
 
   const config = sanitizeConfig(null);
@@ -1060,14 +1577,15 @@ function createWorld(container) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.minDistance = 0.22;
-  controls.maxDistance = 1.4;
-  controls.maxPolarAngle = Math.PI * 0.49;
-  controls.target.set(0, 0.07, 0.1);
+  controls.minDistance = 0.16;
+  controls.maxDistance = 1.3;
+  controls.maxPolarAngle = Math.PI * 0.47;
+  controls.target.set(0.02, 0.07, 0.1);
   if (cached.camTarget) controls.target.copy(cached.camTarget);
   controls.update();
   world.controls = controls;
 
+  applyQuality(world, 2);
   return world;
 }
 
@@ -1086,30 +1604,14 @@ function applyThemeToWorld(world) {
   const pal = themePalette(dark);
   world.dark = dark;
   world.pal = pal;
-  world.scene.background = new THREE.Color(pal.bg);
+  applyBackdrop(world, pal);
   world.hemi.color.set(pal.hemiSky);
   world.hemi.groundColor.set(pal.hemiGround);
   world.hemi.intensity = pal.hemiInt;
-  world.dir.intensity = pal.dirInt;
-  world.fill.intensity = pal.fillInt;
-  world.renderer.toneMappingExposure = dark ? 1.0 : 1.12;
-  if (world.grid) {
-    (Array.isArray(world.grid.material) ? world.grid.material : [world.grid.material]).forEach((m, i) => {
-      if (i === 0) m.color.set(pal.grid);
-      else m.color.set(pal.grid2);
-      m.opacity = dark ? 0.28 : 0.35;
-    });
-  }
-  const next = makeMaterials(dark);
-  Object.keys(world.mats).forEach((k) => {
-    if (next[k] && world.mats[k]) {
-      world.mats[k].color.copy(next[k].color);
-      if (world.mats[k].emissive && next[k].emissive) world.mats[k].emissive.copy(next[k].emissive);
-      world.mats[k].emissiveIntensity = next[k].emissiveIntensity || 0;
-      world.mats[k].needsUpdate = true;
-      next[k].dispose();
-    }
-  });
+  world.key.intensity = pal.keyInt;
+  world.fill.intensity = pal.rimInt;
+  world.scene.environmentIntensity = pal.env;
+  world.renderer.toneMappingExposure = pal.exposure;
 }
 
 function resizeToContainer(world, viewport) {
@@ -1301,6 +1803,7 @@ function placeHeld() {
   ctx.held.body.angularVelocity.set(0, 0, 0);
   ctx.held.mesh.position.copy(pos);
   ctx.held.mesh.quaternion.copy(rot);
+  updateBlob(ctx.held);
 }
 
 function setTargets(j, snap) {
@@ -1477,9 +1980,11 @@ function handleTap(ev) {
   ray.setFromCamera(new THREE.Vector2(nx, ny), ctx.world.camera);
   let target = null;
   const objMeshes = ctx.objects.map((o) => o.mesh);
-  const hits = ray.intersectObjects(objMeshes, false);
+  const hits = ray.intersectObjects(objMeshes, true);
   if (hits.length) {
-    const p = hits[0].object.position;
+    let hitObj = hits[0].object;
+    while (hitObj.parent && !objMeshes.includes(hitObj)) hitObj = hitObj.parent;
+    const p = hitObj.position;
     target = { x: p.x, y: Math.max(0.018, p.y), z: p.z };
   } else {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -1667,6 +2172,7 @@ function loop(now) {
       if (o !== ctx.held) {
         o.mesh.position.copy(o.body.position);
         o.mesh.quaternion.copy(o.body.quaternion);
+        updateBlob(o);
       }
     });
     placeHeld();
@@ -1680,7 +2186,9 @@ function loop(now) {
 
   const controlsMoved = world.controls.update();
   const awake = objectsAwake(ctx.objects);
+  updateLed(moving);
   world.renderer.render(world.scene, world.camera);
+  adaptQuality(dtMs);
 
   const idle =
     !moving &&
@@ -1695,6 +2203,38 @@ function loop(now) {
     return;
   }
   ctx.raf = requestAnimationFrame(loop);
+}
+
+/* LED di stato: verde fermo, ambra in movimento, rosso se un servo è in saturazione. */
+const LED_COLORS = { idle: 0x23ff6a, move: 0xffb020, sat: 0xff3326 };
+function updateLed(moving) {
+  if (!ctx || !ctx.world.mats.led) return;
+  const sat = JOINT_KEYS.some((k) => ctx.state[k].sat);
+  const mode = sat ? "sat" : moving || ctx.demo ? "move" : "idle";
+  if (ctx.ledMode === mode) return;
+  ctx.ledMode = mode;
+  ctx.world.mats.led.emissive.setHex(LED_COLORS[mode]);
+}
+
+/* Qualità adattiva: se l'iPhone scende sotto ~45 fps riduce risoluzione e ombre. */
+function adaptQuality(dtMs) {
+  if (!ctx || ctx.qualityLocked) return;
+  const p = ctx.perf || (ctx.perf = { n: 0, t: 0, cool: 0 });
+  if (dtMs > 120 || dtMs <= 0) {
+    p.n = 0;
+    p.t = 0;
+    return;
+  }
+  p.n++;
+  p.t += dtMs;
+  if (p.n < 90) return;
+  const fps = (p.n * 1000) / p.t;
+  p.n = 0;
+  p.t = 0;
+  if (fps < 45 && ctx.world.quality > 0) {
+    applyQuality(ctx.world, ctx.world.quality - 1);
+    resizeToContainer(ctx.world, ctx.viewport);
+  }
 }
 
 function mount(container, opts) {
@@ -1865,6 +2405,20 @@ const api = {
     return ctx ? { ...ctx.config } : { ...DEFAULT_CONFIG };
   },
   requestRender: requestTick,
+  setCamera(pos, target) {
+    if (!ctx || !pos) return;
+    ctx.world.camera.position.set(pos[0], pos[1], pos[2]);
+    if (target) ctx.world.controls.target.set(target[0], target[1], target[2]);
+    ctx.world.controls.update();
+    requestTick();
+  },
+  setQuality(level, lock) {
+    if (!ctx) return;
+    applyQuality(ctx.world, clamp(Math.round(Number(level) || 0), 0, QUALITY.length - 1));
+    resizeToContainer(ctx.world, ctx.viewport);
+    ctx.qualityLocked = !!lock;
+    requestTick();
+  },
   isMounted() {
     return !!ctx;
   },
@@ -1872,6 +2426,21 @@ const api = {
     if (!ctx) return { fps: 0, sat: false };
     return {
       fps: ctx.fps,
+      quality: ctx.world.quality,
+      pixelRatio: ctx.world.renderer.getPixelRatio(),
+      drawCalls: ctx.world.renderer.info.render.calls,
+      triangles: ctx.world.renderer.info.render.triangles,
+      meshes: (() => {
+        let n = 0;
+        let c = 0;
+        ctx.world.scene.traverse((o) => {
+          if (o.isMesh) {
+            n++;
+            if (o.castShadow) c++;
+          }
+        });
+        return n + "/" + c;
+      })(),
       sat: JOINT_KEYS.some((k) => ctx.state[k].sat),
       held: !!(ctx.held && ctx.held.kind),
       payload: ctx.config.payload,
