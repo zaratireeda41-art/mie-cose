@@ -1,9 +1,11 @@
 /* Service worker — Mie Cose. Rete prima, cache come riserva per l'uso offline. */
-const VERSION = "mie-cose-v7";
+const VERSION = "mie-cose-v8";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
+  "./motion.css",
+  "./motion.js",
   "./app.js",
   "./frasi.js",
   "./push-config.js",

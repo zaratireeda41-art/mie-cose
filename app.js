@@ -58,6 +58,11 @@
   let taskFilter = "aperti";
   let moneyCursor = startOfMonth(new Date());
   let freelanceYear = new Date().getFullYear();
+  const TAB_ORDER = ["home", "tasks", "study", "money", "arm", "settings"];
+  let lastViewKey = null;
+  let lastTabIdx = 0;
+  let lastPhraseShown = null;
+  const MM = window.MieMotion || null;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -215,16 +220,38 @@
     document.body.setAttribute("data-theme", name);
   }
 
-  function paintContent(html) {
+  function viewInfo() {
+    const key = examDetailId ? "exam:" + examDetailId : tab;
+    const fresh = key !== lastViewKey;
+    const idx = TAB_ORDER.indexOf(tab);
+    let dir = "fwd";
+    if (examDetailId || tab === "settings") dir = "up";
+    else if (lastViewKey && (lastViewKey.indexOf("exam:") === 0 || lastViewKey === "settings")) dir = "back";
+    else if (idx < lastTabIdx) dir = "back";
+    return { key: key, freshView: fresh, dir: dir, idx: idx };
+  }
+
+  function paintContent(html, info) {
     if (window.MiaArm3D && window.MiaArm3D.isMounted && window.MiaArm3D.isMounted()) {
       if (data && data.arm) data.arm.joints = window.MiaArm3D.getJoints();
       window.MiaArm3D.unmount();
     }
+    info = info || viewInfo();
     const el = $("#content");
-    el.classList.remove("enter");
+    if (MM) MM.beforePaint(el, info);
     el.innerHTML = html;
-    void el.offsetWidth;
-    el.classList.add("enter");
+    lastViewKey = info.key;
+    lastTabIdx = info.idx;
+    if (MM) {
+      MM.afterPaint(el, info);
+      if (info.freshView) { MM.swapTitle(); MM.popFab(); MM.updateTabGlider(true); }
+      else MM.updateTabGlider(false);
+    } else {
+      el.classList.remove("enter");
+      void el.offsetWidth;
+      el.classList.add("enter");
+    }
+    liveTick();
     if (tab === "arm" && !examDetailId) mountArm3D();
   }
 
@@ -329,17 +356,47 @@
   }
 
   let toastTimer;
-  function toast(msg) {
+  let toastTimer2;
+  function toast(msg, opts) {
+    opts = opts && typeof opts === "object" ? opts : {};
     const root = $("#toast-root");
-    root.innerHTML = '<div class="toast">' + escapeHtml(msg) + "</div>";
+    root.innerHTML = '<div class="toast' + (opts.action ? " has-action" : "") + (opts.tone ? " tone-" + opts.tone : "") + '"><span class="toast-msg">' + escapeHtml(msg) + "</span>" +
+      (opts.action ? '<button type="button" class="toast-action">' + escapeHtml(opts.action) + "</button>" : "") + "</div>";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { root.innerHTML = ""; }, 2400);
+    clearTimeout(toastTimer2);
+    const el = root.firstChild;
+    if (opts.action && opts.onAction) {
+      el.querySelector(".toast-action").addEventListener("click", function () {
+        clearTimeout(toastTimer);
+        clearTimeout(toastTimer2);
+        root.innerHTML = "";
+        opts.onAction();
+      });
+    }
+    toastTimer = setTimeout(function () {
+      el.classList.add("out");
+      toastTimer2 = setTimeout(function () { if (el.parentNode === root) root.innerHTML = ""; }, 260);
+    }, opts.duration || (opts.action ? 4800 : 2400));
   }
 
+  let sheetToken = 0;
   function closeSheet() {
     const root = $("#sheet-root");
-    root.hidden = true;
-    root.innerHTML = "";
+    if (root.hidden) return;
+    const token = ++sheetToken;
+    if (!MM || MM.reduced() || !root.querySelector(".sheet")) {
+      root.hidden = true;
+      root.innerHTML = "";
+      root.classList.remove("closing");
+      return;
+    }
+    root.classList.add("closing");
+    setTimeout(function () {
+      if (token !== sheetToken) return;
+      root.hidden = true;
+      root.innerHTML = "";
+      root.classList.remove("closing");
+    }, 280);
   }
 
   function openSheet(opts) {
@@ -350,6 +407,8 @@
     const onDelete = opts.onDelete;
     const deleteLabel = opts.deleteLabel || "Elimina";
     const root = $("#sheet-root");
+    sheetToken++;
+    root.classList.remove("closing");
     root.hidden = false;
     root.innerHTML =
       '<div class="sheet-backdrop" data-close-sheet></div>' +
@@ -381,6 +440,10 @@
     root.querySelectorAll("[data-close-sheet]").forEach(function (el) {
       el.addEventListener("click", closeSheet);
     });
+    if (MM) {
+      MM.bindSheetDrag(root, closeSheet);
+      MM.enhanceSegments(root);
+    }
 
     const first = root.querySelector("input, textarea, select");
     if (first && first.type !== "date" && first.type !== "time" && first.type !== "month") {
@@ -434,7 +497,8 @@
       fab.setAttribute("aria-label", "Aggiungi sessione di studio");
       fab.dataset.action = "add-session";
       applyTheme();
-      paintContent(exam ? renderExamDetail(exam) : '<p class="empty">Esame non trovato.</p>');
+      const infoD = viewInfo();
+      paintContent(exam ? renderExamDetail(exam) : '<p class="empty">Esame non trovato.</p>', infoD);
       return;
     }
 
@@ -462,7 +526,8 @@
     }
 
     applyTheme();
-    paintContent(view.render());
+    const info = viewInfo();
+    paintContent(view.render(), info);
     bindDynamic();
   }
 
@@ -480,6 +545,104 @@
     const icon = EMPTY_ICONS[kind] || EMPTY_ICONS.spark;
     return '<div class="empty card"><div class="art"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       icon + "</svg></div><h3>" + escapeHtml(title) + "</h3><p>" + escapeHtml(text) + "</p></div>";
+  }
+
+  function countSpan(value, kind, key, text, cls) {
+    const v = Number(value) || 0;
+    return '<span class="num' + (cls ? " " + cls : "") + '" data-count="' + v + '" data-fmt="' + kind + '" data-count-key="' + key + '">' + text + "</span>";
+  }
+
+  function pad2(n) { return String(n).padStart(2, "0"); }
+
+  function countdownText(ms) {
+    if (ms <= 0) return "adesso";
+    const s = Math.floor(ms / 1000);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return (d ? d + "g " : "") + pad2(h) + ":" + pad2(m) + ":" + pad2(sec);
+  }
+
+  function nextDeadline() {
+    const now = Date.now();
+    const cands = [];
+    data.tasks.forEach(function (t) {
+      if (t.done || !t.due) return;
+      const at = taskDueSortValue(t);
+      if (at > now) cands.push({ kind: "task", id: t.id, title: t.title, at: at, label: "Scade tra" });
+    });
+    data.exams.forEach(function (e) {
+      if (e.stato === "superato" || !e.dataAppello) return;
+      const d = parseDate(e.dataAppello);
+      if (!d) return;
+      const at = d.getTime();
+      if (at > now) cands.push({ kind: "exam", id: e.id, title: e.materia, at: at, label: "Appello tra" });
+    });
+    cands.sort(function (a, b) { return a.at - b.at; });
+    return cands[0] || null;
+  }
+
+  function dayProgress() {
+    const n = new Date();
+    return (n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds()) / 86400;
+  }
+
+  function liveHeroHtml(overdue) {
+    const n = new Date();
+    const next = nextDeadline();
+    const dp = dayProgress();
+    const nextHtml = next
+      ? '<button type="button" class="live-next pressable" data-open="' + next.kind + '" data-id="' + next.id + '">' +
+        '<span class="live-next-ico ' + next.kind + '" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        (next.kind === "exam" ? EMPTY_ICONS.study : EMPTY_ICONS.calendar) + "</svg></span>" +
+        '<span class="live-next-copy"><span class="live-next-lab">' + next.label + "</span>" +
+        '<span class="live-next-title">' + escapeHtml(next.title) + "</span></span>" +
+        '<span class="live-cd" data-countdown="' + next.at + '">' + countdownText(next.at - Date.now()) + "</span></button>"
+      : '<div class="live-next calm"><span class="live-next-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        EMPTY_ICONS.spark + '</svg></span><span class="live-next-copy"><span class="live-next-lab">Tutto sotto controllo</span><span class="live-next-title">Nessuna scadenza in arrivo</span></span></div>';
+    return '<section class="live-hero" aria-label="Adesso">' +
+      '<div class="live-top"><div class="live-clock" aria-live="off"><span data-live-hm>' + pad2(n.getHours()) + ":" + pad2(n.getMinutes()) + "</span>" +
+      '<span class="live-sec" data-live-sec>' + pad2(n.getSeconds()) + "</span></div>" +
+      (overdue ? '<span class="live-alert"><i></i>' + overdue + " in ritardo</span>" : '<span class="live-ok"><i></i>In orario</span>') + "</div>" +
+      '<div class="live-day"><span class="live-day-lab">Giornata</span><div class="live-day-bar"><span data-day-bar style="transform:scaleX(' + dp.toFixed(4) + ')"></span></div>' +
+      '<span class="live-day-pct" data-day-pct>' + Math.round(dp * 100) + "%</span></div>" +
+      nextHtml + "</section>";
+  }
+
+  function liveTick() {
+    const root = document.getElementById("content");
+    if (!root) return;
+    const n = new Date();
+    const hm = root.querySelector("[data-live-hm]");
+    if (hm) {
+      hm.textContent = pad2(n.getHours()) + ":" + pad2(n.getMinutes());
+      const sec = root.querySelector("[data-live-sec]");
+      if (sec) sec.textContent = pad2(n.getSeconds());
+      const dp = dayProgress();
+      const bar = root.querySelector("[data-day-bar]");
+      if (bar) bar.style.transform = "scaleX(" + dp.toFixed(4) + ")";
+      const pct = root.querySelector("[data-day-pct]");
+      if (pct) pct.textContent = Math.round(dp * 100) + "%";
+    }
+    root.querySelectorAll("[data-countdown]").forEach(function (el) {
+      el.textContent = countdownText(Number(el.getAttribute("data-countdown")) - Date.now());
+    });
+    const left = root.querySelector("[data-slot-left]");
+    if (left) {
+      const ms = SLOT_MS - (Date.now() % SLOT_MS);
+      left.textContent = pad2(Math.floor(ms / 60000)) + ":" + pad2(Math.floor((ms % 60000) / 1000));
+      const sb = root.querySelector("[data-slot-bar]");
+      if (sb) sb.style.transform = "scaleX(" + (1 - ms / SLOT_MS).toFixed(4) + ")";
+    }
+  }
+
+  function daysUntil(iso) {
+    const d = parseDate(iso);
+    if (!d) return null;
+    const t = new Date();
+    const today = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    return Math.round((d.getTime() - today.getTime()) / 86400000);
   }
 
   function upcomingItems() {
@@ -610,13 +773,18 @@
             '" aria-label="Togli dai preferiti">×</button></div>';
         }).join("") + "</div></div>"
       : "";
-    return '<section class="phrase-card" id="frase-momento">' +
+    const reveal = lastPhraseShown !== p.n || lastViewKey !== "home";
+    lastPhraseShown = p.n;
+    const slotMs = SLOT_MS - (Date.now() % SLOT_MS);
+    return '<section class="phrase-card' + (reveal ? " reveal" : "") + '" id="frase-momento">' +
       '<div class="phrase-head"><img src="logo.svg" width="28" height="28" alt="">' +
       '<div class="copy"><p class="label">Frase del momento</p>' +
       '<span class="pill">' + escapeHtml(p.themeLabel || "Vita") + "</span></div></div>" +
-      '<blockquote class="phrase-text">' + escapeHtml(p.text) + "</blockquote>" +
+      '<blockquote class="phrase-text" aria-label="' + escapeHtml(p.text) + '">' + (MM ? MM.wordsHtml(p.text, escapeHtml) : escapeHtml(p.text)) + "</blockquote>" +
+      '<div class="slot-timer" title="Prossima frase tra ' + mins + ' min"><span class="slot-lab">Prossima frase</span><div class="slot-bar"><span data-slot-bar style="transform:scaleX(' + (1 - slotMs / SLOT_MS).toFixed(4) + ')"></span></div>' +
+      '<span class="slot-left" data-slot-left>' + pad2(Math.floor(slotMs / 60000)) + ":" + pad2(Math.floor((slotMs % 60000) / 1000)) + "</span></div>" +
       '<p class="phrase-meta">Una tra ' + escapeHtml(tot.human) + " di frasi possibili (" +
-      escapeHtml(tot.exact) + "). Si rinnova ogni 30 minuti · prossima tra " + mins + " min.</p>" +
+      escapeHtml(tot.exact) + "). Si rinnova ogni 30 minuti. Tira giù la pagina per cambiarla.</p>" +
       '<div class="phrase-actions">' +
       '<button type="button" class="btn-primary" data-action="phrase-new">Nuova</button>' +
       '<button type="button" class="btn-secondary" data-action="phrase-fav" aria-pressed="' + (fav ? "true" : "false") + '">' +
@@ -830,15 +998,16 @@
     const inBar = Math.round((monthIn / monthMax) * 100);
     const outBar = Math.round((monthOut / monthMax) * 100);
 
-    return phraseCardHtml() +
+    const examDays = nextExam ? daysUntil(nextExam.dataAppello) : null;
+    return liveHeroHtml(overdue) + phraseCardHtml() +
       '<div class="stats">' +
-      '<div class="stat tint-tasks"><div class="stat-row"><div class="copy"><p class="label">Da fare</p><div class="value">' + openTasks.length +
+      '<div class="stat tint-tasks"><div class="stat-row"><div class="copy"><p class="label">Da fare</p><div class="value">' + countSpan(openTasks.length, "int", "home-open", String(openTasks.length)) +
       '</div><div class="sub">' + taskSub + '</div></div>' + progressRing(taskPct, { size: 56, stroke: 6, cls: "tasks" }) + "</div></div>" +
       '<div class="stat tint-study"><p class="label">Prossimo esame</p><div class="value" style="font-size:18px;padding-top:4px">' +
-      (nextExam ? escapeHtml(relativeDue(nextExam.dataAppello) || "—") : "—") +
+      (nextExam ? (examDays != null && examDays > 1 ? "tra " + countSpan(examDays, "int", "home-exam-days", String(examDays)) + " giorni" : escapeHtml(relativeDue(nextExam.dataAppello) || "—")) : "—") +
       '</div><div class="sub">' + examSub + "</div></div>" +
       '<div class="stat tint-money"><p class="label">Questo mese</p><div class="value amount ' + (monthBal >= 0 ? "pos" : "neg") + '">' +
-      formatEuro(monthBal) + '</div><div class="mini-bars" style="margin-top:8px">' +
+      countSpan(monthBal, "euro", "home-bal", formatEuro(monthBal)) + '</div><div class="mini-bars" style="margin-top:8px">' +
       '<div class="mini-bar"><span class="lbl">In</span><div class="track"><span style="width:' + inBar + '%"></span></div></div>' +
       '<div class="mini-bar"><span class="lbl">Out</span><div class="track out"><span style="width:' + outBar + '%"></span></div></div>' +
       "</div></div>" +
@@ -869,7 +1038,7 @@
     });
 
     const filters = [["aperti", "Aperti"], ["oggi", "Oggi"], ["ritardo", "In ritardo"], ["completati", "Fatti"]];
-    const segs = '<div class="segments" role="tablist">' + filters.map(function (f) {
+    const segs = '<div class="segments" role="tablist" data-seg-key="task-filter">' + filters.map(function (f) {
       return '<button type="button" role="tab" class="' + (taskFilter === f[0] ? "active" : "") + '" data-task-filter="' + f[0] + '">' + f[1] + "</button>";
     }).join("") + "</div>";
 
@@ -877,12 +1046,23 @@
       ? '<div class="list">' + tasks.map(taskRow).join("") + "</div>"
       : emptyState(taskFilter === "completati" ? "Nessun completato" : "Niente da fare qui", "Tocca + per aggiungere una cosa da fare, con data, priorità e categoria.", "tasks");
 
-    return segs + list;
+    const allT = data.tasks.length;
+    const doneT = data.tasks.filter(function (x) { return x.done; }).length;
+    const pctT = allT ? (doneT / allT) * 100 : 0;
+    const head = '<div class="task-head"><div class="task-head-copy"><span class="task-head-big">' + countSpan(doneT, "int", "tasks-done", String(doneT)) +
+      '<small>/' + allT + '</small></span><span class="task-head-lab">completate</span></div>' +
+      '<div class="task-progress"><span style="transform:scaleX(' + (pctT / 100).toFixed(4) + ')"></span></div>' +
+      '<span class="task-head-pct">' + countSpan(pctT, "pct", "tasks-pct", Math.round(pctT) + "%") + "</span></div>";
+    const tip = tasks.length && taskFilter !== "completati" ? '<p class="hint swipe-hint">Scorri una riga a destra per completarla, a sinistra per eliminarla.</p>' : "";
+    return head + segs + list + tip;
   }
 
   function taskRow(t) {
     const overdue = isOverdue(t);
-    return '<div class="row" data-task-id="' + t.id + '">' +
+    return '<div class="swipe" data-swipe-id="' + t.id + '">' +
+      '<div class="swipe-bg" aria-hidden="true"><span class="sw-right">' + iconCheck() + (t.done ? " Riapri" : " Fatta") + '</span>' +
+      '<span class="sw-left">Elimina <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></span></div>' +
+      '<div class="row swipe-row prio-' + escapeHtml(t.priority || "media") + '" data-task-id="' + t.id + '">' +
       '<button type="button" class="check ' + (t.done ? "on" : "") + '" data-toggle-task="' + t.id +
       '" aria-label="' + (t.done ? "Segna come da fare" : "Segna come fatta") + '">' + iconCheck() + "</button>" +
       '<button type="button" class="row-body pressable" data-edit-task="' + t.id + '" style="background:transparent;padding:0;text-align:left">' +
@@ -893,7 +1073,7 @@
         : '<span class="pill">Senza data</span>') +
       (t.priority ? '<span class="pill ' + t.priority + '">' + escapeHtml(labelOf(PRIORITIES, t.priority)) + "</span>" : "") +
       (t.category ? '<span class="pill">' + escapeHtml(labelOf(TASK_CATS, t.category)) + "</span>" : "") +
-      "</div></button></div>";
+      "</div></button></div></div>";
   }
 
   function openTaskForm(id) {
@@ -994,12 +1174,53 @@
     const pct = totals.previsti ? Math.min(100, (totals.acquisiti / totals.previsti) * 100) : 0;
     const list = exams.length ? exams.map(examCard).join("") : emptyState("Nessun esame", "Aggiungi le materie con data d’appello, CFU e stato. Potrai annotare le sessioni di studio.", "study");
 
-    return '<div class="hero-stat hero-split"><div class="hero-copy"><p class="label">Media ponderata</p><div class="value">' + mediaLabel + "</div>" +
-      '<div class="row-meta" style="margin-top:8px"><span>' + totals.acquisiti + " CFU acquisiti · " + totals.previsti + " CFU previsti</span></div>" +
+    const mediaVal = media == null ? null : Math.round(media * 10) / 10;
+    return '<div class="hero-stat hero-split"><div class="hero-copy"><p class="label">Media ponderata</p><div class="value">' +
+      (mediaVal == null ? mediaLabel : countSpan(mediaVal, "dec1", "study-media", mediaLabel)) + "</div>" +
+      '<div class="row-meta" style="margin-top:8px"><span>' + countSpan(totals.acquisiti, "int", "study-cfu", String(totals.acquisiti)) + " CFU acquisiti · " + totals.previsti + " CFU previsti</span></div>" +
       '<p class="hint" style="margin:10px 0 0">La media è calcolata sugli esami superati con voto. Se hai 30 e lode, la lode è conteggiata come 30 (alcuni atenei usano 31 o 32).</p></div>' +
-      ringBlock(pct, totals.previsti ? Math.round(pct) + "%" : "—", "CFU", { size: 96, stroke: 8, cls: "study" }) +
-      "</div>" +
+      ringBlock(pct, totals.previsti ? countSpan(pct, "pct", "study-pct", Math.round(pct) + "%") : "—", "CFU", { size: 96, stroke: 8, cls: "study" }) +
+      "</div>" + studyChartHtml() +
       '<h2 class="section-title">Esami</h2>' + list;
+  }
+
+  function studyChartHtml() {
+    const days = 14;
+    const perDay = {};
+    data.exams.forEach(function (e) {
+      (e.sessions || []).forEach(function (x) {
+        if (!x.date) return;
+        perDay[x.date] = (perDay[x.date] || 0) + (Number(x.minutes) || 0);
+      });
+    });
+    const cols = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = toISODate(d);
+      cols.push({ iso: iso, min: perDay[iso] || 0, wd: WEEKDAYS[d.getDay()].slice(0, 1).toUpperCase(), today: i === 0 });
+    }
+    const max = Math.max(60, Math.max.apply(null, cols.map(function (c) { return c.min; })));
+    const totalMin = cols.reduce(function (a, c) { return a + c.min; }, 0);
+    const week = cols.slice(-7).reduce(function (a, c) { return a + c.min; }, 0);
+    let streak = 0;
+    for (let i = cols.length - 1; i >= 0; i--) {
+      if (cols[i].min > 0) streak++;
+      else if (i === cols.length - 1) continue;
+      else break;
+    }
+    const bars = cols.map(function (c, i) {
+      const h = c.min ? Math.max(0.06, c.min / max) : 0.02;
+      return '<div class="bcol14' + (c.today ? " today" : "") + (c.min ? " has" : "") + '" style="--k:' + i + '" title="' + escapeHtml(formatDate(c.iso, { short: true })) + ": " + formatHours(c.min) + '">' +
+        '<div class="b14wrap"><span class="b14" style="height:' + (h * 100).toFixed(1) + '%"></span></div><span class="bl">' + c.wd + "</span></div>";
+    }).join("");
+    return '<section class="card chart-card" data-reveal>' +
+      '<div class="chart-head"><h3>Studio, ultimi 14 giorni</h3>' +
+      '<span class="streak' + (streak ? " on" : "") + '"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 2c1 3.5-1.5 5-1.5 7.5 0 1.4 1 2.5 2.3 2.5 1.7 0 2.7-1.5 2.2-3.6C17.8 10.3 19 13 19 15a7 7 0 1 1-14 0c0-4.4 4-6.9 7-13z"/></svg>' +
+      countSpan(streak, "int", "study-streak", String(streak)) + (streak === 1 ? " giorno" : " giorni") + "</span></div>" +
+      '<div class="chart-kpis"><div><span class="kpi">' + countSpan(week / 60, "hours", "study-week", numFmt.format(Math.round(week / 6) / 10) + " h") + '</span><span class="kpi-lab">questa settimana</span></div>' +
+      '<div><span class="kpi">' + countSpan(totalMin / 60, "hours", "study-14", numFmt.format(Math.round(totalMin / 6) / 10) + " h") + '</span><span class="kpi-lab">in 14 giorni</span></div></div>' +
+      '<div class="bars14">' + bars + "</div></section>";
   }
 
   function examCard(e) {
@@ -1021,13 +1242,16 @@
     const voto = e.stato === "superato" && isFiniteNumber(e.voto)
       ? '<div class="voto">' + e.voto + (e.lode ? " e lode" : "") + "</div>"
       : "";
-    return '<button type="button" class="exam-card" data-open-exam="' + e.id + '">' +
+    const dl = e.stato !== "superato" && e.dataAppello ? daysUntil(e.dataAppello) : null;
+    const dlPill = dl == null ? "" : dl < 0 ? '<span class="pill overdue">passato</span>'
+      : '<span class="pill days-left' + (dl <= 7 ? " hot" : dl <= 21 ? " warm" : "") + '">' + (dl === 0 ? "oggi" : dl === 1 ? "domani" : "tra " + dl + " g") + "</span>";
+    return '<button type="button" class="exam-card st-' + e.stato + '" data-open-exam="' + e.id + '">' +
       '<div class="top"><div><h3>' + escapeHtml(e.materia) + '</h3><div class="meta">' +
       (e.cfu ? e.cfu + " CFU" : "CFU non indicati") +
       (e.dataAppello ? " · " + escapeHtml(formatDate(e.dataAppello, { short: true })) : "") +
       progress +
       '</div></div><div class="exam-side"><span class="pill ' + e.stato + '">' +
-      escapeHtml(labelOf(EXAM_STATES, e.stato)) + "</span>" + voto + ring + "</div></div></button>";
+      escapeHtml(labelOf(EXAM_STATES, e.stato)) + "</span>" + dlPill + voto + ring + "</div></div></button>";
   }
 
   function renderExamDetail(e) {
@@ -1050,12 +1274,14 @@
       (e.stato === "superato" && isFiniteNumber(e.voto) ? '<span class="pill superato">' + e.voto + (e.lode ? " e lode" : "") + "</span>" : "") +
       "</div>" +
       (e.dataAppello ? '<p class="muted" style="margin:0 0 8px">Appello: ' + escapeHtml(formatDate(e.dataAppello, { withWeekday: true })) + "</p>" : "") +
+      (e.dataAppello && e.stato !== "superato" && parseDate(e.dataAppello) && parseDate(e.dataAppello).getTime() > Date.now()
+        ? '<p class="exam-cd"><span>Mancano</span> <strong data-countdown="' + parseDate(e.dataAppello).getTime() + '">' + countdownText(parseDate(e.dataAppello).getTime() - Date.now()) + "</strong></p>" : "") +
       '<p class="label" style="margin:0">Tempo di studio</p>' +
       '<div class="value" style="font-size:28px;margin-top:4px">' + (mins ? formatHours(mins) : "—") + "</div>" +
       (target ? '<p class="hint" style="margin:8px 0 0">Obiettivo: ' + escapeHtml(String(target)) + " h</p>" : "") +
       (e.notes ? '<p style="margin:12px 0 0;white-space:pre-wrap">' + escapeHtml(e.notes) + "</p>" : "") +
       '<button type="button" class="btn-secondary" data-edit-exam="' + e.id + '" style="margin-top:14px">Modifica esame</button></div>' +
-      (target ? ringBlock(pct, Math.round(pct) + "%", "studio", { size: 96, stroke: 8, cls: "study" }) : "") +
+      (target ? ringBlock(pct, countSpan(pct, "pct", "exam-pct", Math.round(pct) + "%"), "studio", { size: 96, stroke: 8, cls: "study" }) : "") +
       "</div>" +
       '<h2 class="section-title">Sessioni di studio</h2>' + sessionList;
   }
@@ -1108,10 +1334,12 @@
           notes: String(fd.get("notes") || "").trim(),
         };
         if (payload.lode && payload.voto == null) payload.voto = 30;
+        const justPassed = payload.stato === "superato" && (!e || e.stato !== "superato");
+        if (justPassed && MM) setTimeout(function () { MM.celebrate(); toast("Esame superato. Complimenti!", { tone: "win" }); }, 320);
         if (e) Object.assign(e, payload);
         else data.exams.push(Object.assign({ id: uid(), sessions: [] }, payload));
         save();
-        toast(e ? "Esame aggiornato" : "Esame aggiunto");
+        if (!justPassed) toast(e ? "Esame aggiornato" : "Esame aggiunto");
         render();
       },
     });
@@ -1218,24 +1446,25 @@
       '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5l8 7-8 7"></path></svg></button></div>' +
       '<div class="hero-stat">' +
       '<div class="stats cols3" style="margin:0">' +
-      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Entrate</p><div class="value amount pos" style="font-size:18px">' + formatEuro(entrate) + "</div></div>" +
-      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Uscite</p><div class="value amount neg" style="font-size:18px">' + formatEuro(uscite) + "</div></div>" +
-      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Saldo</p><div class="value amount ' + (saldo >= 0 ? "pos" : "neg") + '" style="font-size:18px">' + formatEuro(saldo) + "</div></div></div>" +
+      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Entrate</p><div class="value amount pos" style="font-size:18px">' + countSpan(entrate, "euro", "m-in", formatEuro(entrate)) + "</div></div>" +
+      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Uscite</p><div class="value amount neg" style="font-size:18px">' + countSpan(uscite, "euro", "m-out", formatEuro(uscite)) + "</div></div>" +
+      '<div class="stat" style="padding:0;border:0;box-shadow:none;background:transparent"><p class="label">Saldo</p><div class="value amount ' + (saldo >= 0 ? "pos" : "neg") + '" style="font-size:18px">' + countSpan(saldo, "euro", "m-bal", formatEuro(saldo)) + "</div></div></div>" +
       '<div class="mini-bars">' +
       '<div class="mini-bar"><span class="lbl">Entrate</span><div class="track"><span style="width:' + Math.round((entrate / monthMax) * 100) + '%"></span></div><span class="amt pos">' + formatEuro(entrate) + "</span></div>" +
       '<div class="mini-bar"><span class="lbl">Uscite</span><div class="track out"><span style="width:' + Math.round((uscite / monthMax) * 100) + '%"></span></div><span class="amt neg">' + formatEuro(uscite) + "</span></div>" +
       "</div>" +
-      '<p class="hint" style="margin:10px 0 0">Saldo complessivo: <strong>' + formatEuro(allBal) + "</strong></p></div>" +
+      '<p class="hint" style="margin:10px 0 0">Saldo complessivo: <strong>' + countSpan(allBal, "euro", "m-all", formatEuro(allBal)) + "</strong></p></div>" +
+      moneyChartsHtml(monthTx, uscite) +
       '<h2 class="section-title">Freelance ' + freelanceYear + "</h2>" +
       '<div class="card hero-split" style="padding:16px 18px">' +
       '<div class="hero-copy"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><div>' +
-      '<div class="amount" style="font-size:24px">' + formatEuro(flTot) + "</div>" +
+      '<div class="amount" style="font-size:24px">' + countSpan(flTot, "euro", "m-fl", formatEuro(flTot)) + "</div>" +
       '<div class="muted" style="font-size:13px;margin-top:2px">su ' + formatEuro(SOGLIA_INPS) + " di franchigia</div></div>" +
       '<label class="muted" style="font-size:13px">Anno <select id="freelance-year" style="margin-left:6px;background:var(--fill);border:0;border-radius:8px;padding:6px 8px">' +
       yearOpts.map(function (y) { return '<option value="' + y + '"' + (y === freelanceYear ? " selected" : "") + ">" + y + "</option>"; }).join("") +
       "</select></label></div>" +
       '<p class="hint" style="margin:10px 0 0">' + (over ? "Soglia superata di " + formatEuro(flTot - SOGLIA_INPS) + "." : "Restano " + formatEuro(remain) + " prima della soglia.") + "</p></div>" +
-      ringBlock(flPct, Math.round(flPct) + "%", "soglia", { size: 92, stroke: 8, cls: "money " + flTone }) +
+      ringBlock(flPct, countSpan(flPct, "pct", "m-flpct", Math.round(flPct) + "%"), "soglia", { size: 92, stroke: 8, cls: "money " + flTone }) +
       "</div>" +
       '<div class="callout legal ' + (over ? "danger-soft" : near ? "warn" : "") + '" style="margin-top:10px">' +
       "<strong>Promemoria INPS (lavoro autonomo occasionale).</strong> " +
@@ -1243,6 +1472,64 @@
       "Questa sezione è solo un promemoria e non sostituisce un parere fiscale o previdenziale. Resta distinta dal regime del contratto di prestazione occasionale / Libretto Famiglia (art. 54-bis)." +
       "</div>" +
       '<h2 class="section-title">Movimenti</h2>' + list;
+  }
+
+  const DONUT_COLORS = { casa: "#5B4DFF", cibo: "#FF7A1A", trasporti: "#0ABAB5", studio: "#A855F7", braccio: "#FFB020", personale: "#F43F5E", altro: "#94A3B8" };
+
+  function moneyChartsHtml(monthTx, uscite) {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(moneyCursor.getFullYear(), moneyCursor.getMonth() - i, 1);
+      const key = monthKey(d);
+      const list = data.transactions.filter(function (t) { return t.date && t.date.startsWith(key); });
+      months.push({
+        key: key, label: MONTHS[d.getMonth()].slice(0, 3), cur: i === 0,
+        inn: sumBy(list, function (t) { return t.type === "entrata"; }),
+        out: sumBy(list, function (t) { return t.type === "uscita"; })
+      });
+    }
+    const max = Math.max(1, Math.max.apply(null, months.map(function (m) { return Math.max(m.inn, m.out); })));
+    const net6 = months.reduce(function (a, m) { return a + m.inn - m.out; }, 0);
+    const cols = months.map(function (m, i) {
+      const hi = m.inn ? Math.max(0.04, m.inn / max) : 0.015;
+      const ho = m.out ? Math.max(0.04, m.out / max) : 0.015;
+      return '<button type="button" class="bcol' + (m.cur ? " cur" : "") + '" data-month-set="' + m.key + '" style="--k:' + i + '" aria-label="' + m.label + ": entrate " + formatEuro(m.inn) + ", uscite " + formatEuro(m.out) + '">' +
+        '<div class="bpair"><span class="b in" style="height:' + (hi * 100).toFixed(1) + '%"></span><span class="b out" style="height:' + (ho * 100).toFixed(1) + '%"></span></div>' +
+        '<span class="bl">' + m.label + "</span></button>";
+    }).join("");
+    const bars = '<section class="card chart-card" data-reveal><div class="chart-head"><h3>Ultimi 6 mesi</h3>' +
+      '<div class="legend"><span><i class="in"></i>Entrate</span><span><i class="out"></i>Uscite</span></div></div>' +
+      '<div class="chart-kpis"><div><span class="kpi amount ' + (net6 >= 0 ? "pos" : "neg") + '">' + countSpan(net6, "euro", "m-net6", formatEuro(net6)) + '</span><span class="kpi-lab">saldo dei 6 mesi</span></div></div>' +
+      '<div class="bars6">' + cols + "</div><p class=\"hint\" style=\"margin:6px 0 0\">Tocca un mese per aprirlo.</p></section>";
+
+    const outs = monthTx.filter(function (t) { return t.type === "uscita"; });
+    if (!outs.length || uscite <= 0) return bars;
+    const byCat = {};
+    outs.forEach(function (t) { byCat[t.category || "altro"] = (byCat[t.category || "altro"] || 0) + (Number(t.amount) || 0); });
+    const cats = Object.keys(byCat).map(function (k) { return { id: k, v: byCat[k] }; }).sort(function (a, b) { return b.v - a.v; });
+    const size = 132, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+    let acc = 0;
+    const gap = cats.length > 1 ? 2 : 0;
+    const segs = cats.map(function (k, i) {
+      const len = Math.max(0, (k.v / uscite) * c - gap);
+      const seg = '<circle class="donut-seg" cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" style="stroke:' + (DONUT_COLORS[k.id] || "#94A3B8") +
+        ";stroke-width:" + stroke + ";stroke-dasharray:" + len.toFixed(2) + " " + (c - len).toFixed(2) + ";stroke-dashoffset:" + (-acc).toFixed(2) +
+        ";--len:" + len.toFixed(2) + ";--c:" + c.toFixed(2) + ";--k:" + i + '"></circle>';
+      acc += (k.v / uscite) * c;
+      return seg;
+    }).join("");
+    const legend = cats.map(function (k, i) {
+      const pctC = (k.v / uscite) * 100;
+      return '<div class="dl-row" style="--k:' + i + '"><i style="background:' + (DONUT_COLORS[k.id] || "#94A3B8") + '"></i><span class="dl-name">' + escapeHtml(labelOf(TX_CATS.uscita, k.id)) +
+        '</span><span class="dl-pct">' + Math.round(pctC) + '%</span><span class="dl-amt">' + formatEuro(k.v) + "</span></div>";
+    }).join("");
+    const donut = '<section class="card chart-card donut-card" data-reveal><div class="chart-head"><h3>Dove vanno i soldi</h3><span class="muted" style="font-size:12px">' +
+      MONTHS[moneyCursor.getMonth()] + "</span></div>" +
+      '<div class="donut-wrap"><div class="donut"><svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + " " + size + '" aria-hidden="true">' +
+      '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" class="donut-track" style="stroke-width:' + stroke + '"></circle>' + segs + "</svg>" +
+      '<div class="donut-center"><strong>' + countSpan(uscite, "euro", "m-donut", formatEuro(uscite)) + "</strong><span>uscite</span></div></div>" +
+      '<div class="donut-legend">' + legend + "</div></div></section>";
+    return bars + donut;
   }
 
   function txRow(t) {
@@ -1721,8 +2008,58 @@
     save();
   }
 
+  function completeTask(task, at) {
+    at = at || {};
+    if (at.wrap && at.wrap.classList.contains("completing")) return;
+    const willBeDone = !task.done;
+    const apply = function () {
+      task.done = willBeDone;
+      if (willBeDone) task.doneAt = new Date().toISOString();
+      save();
+      render();
+    };
+    if (!willBeDone) {
+      apply();
+      toast("Attività riaperta");
+      return;
+    }
+    const undo = function () { task.done = false; delete task.doneAt; save(); render(); toast("Annullato"); };
+    if (MM && !MM.reduced()) {
+      if (at.check) { at.check.classList.add("on", "just-on"); }
+      if (at.wrap) at.wrap.classList.add("completing");
+      MM.confetti(at.x, at.y, { count: 46, power: 0.8 });
+      MM.haptic(14);
+      const left = data.tasks.filter(function (x) { return !x.done && x !== task; }).length;
+      setTimeout(function () {
+        apply();
+        if (!left) { MM.celebrate(); toast("Hai finito tutto. Ottimo lavoro!", { tone: "win", action: "Annulla", onAction: undo }); }
+        else toast("Fatto. Ne restano " + left, { action: "Annulla", onAction: undo });
+      }, 480);
+    } else {
+      apply();
+      toast("Fatto", { action: "Annulla", onAction: undo });
+    }
+  }
+
+  function deleteTaskWithUndo(id) {
+    const idx = data.tasks.findIndex(function (x) { return x.id === id; });
+    if (idx < 0) return;
+    const removed = data.tasks.splice(idx, 1)[0];
+    save();
+    render();
+    toast("Attività eliminata", {
+      action: "Annulla",
+      onAction: function () {
+        data.tasks.splice(Math.min(idx, data.tasks.length), 0, removed);
+        save();
+        render();
+        toast("Ripristinata");
+      }
+    });
+  }
+
   function onClick(e) {
-    const t = e.target.closest("[data-tab], [data-action], [data-task-filter], [data-toggle-task], [data-edit-task], [data-open], [data-open-exam], [data-edit-exam], [data-edit-session], [data-edit-tx], [data-month-delta], [data-toggle-milestone], [data-edit-milestone], [data-edit-part], [data-edit-log], #fab, #back-btn, #settings-btn");
+    const t = e.target.closest("[data-month-set], [data-tab], [data-action], [data-task-filter], [data-toggle-task], [data-edit-task], [data-open], [data-open-exam], [data-edit-exam], [data-edit-session], [data-edit-tx], [data-month-delta], [data-toggle-milestone], [data-edit-milestone], [data-edit-part], [data-edit-log], #fab, #back-btn, #settings-btn");
     if (!t) return;
 
     if (t.id === "back-btn") {
@@ -1741,11 +2078,24 @@
       handleAction(t.dataset.action || ({ tasks: "add-task", study: "add-exam", money: "add-tx" }[tab]));
       return;
     }
-    if (t.dataset.tab) { setTab(t.dataset.tab); return; }
+    if (t.dataset.monthSet) {
+      const parts = t.dataset.monthSet.split("-").map(Number);
+      moneyCursor = new Date(parts[0], parts[1] - 1, 1);
+      if (MM) MM.haptic(6);
+      render();
+      return;
+    }
+    if (t.dataset.tab) {
+      if (t.dataset.tab !== tab || examDetailId) { if (MM) MM.haptic(6); }
+      setTab(t.dataset.tab);
+      return;
+    }
     if (t.dataset.taskFilter) { taskFilter = t.dataset.taskFilter; render(); return; }
     if (t.dataset.toggleTask) {
       const task = data.tasks.find(function (x) { return x.id === t.dataset.toggleTask; });
-      if (task) { task.done = !task.done; save(); render(); }
+      if (!task) return;
+      const r = t.getBoundingClientRect();
+      completeTask(task, { x: r.left + r.width / 2, y: r.top + r.height / 2, check: t, wrap: t.closest(".swipe") });
       return;
     }
     if (t.dataset.editTask) { openTaskForm(t.dataset.editTask); return; }
@@ -1765,7 +2115,18 @@
     }
     if (t.dataset.toggleMilestone) {
       const m = data.arm.milestones.find(function (x) { return x.id === t.dataset.toggleMilestone; });
-      if (m) { m.done = !m.done; save(); render(); }
+      if (m) {
+        m.done = !m.done;
+        save();
+        if (m.done && MM) {
+          const r = t.getBoundingClientRect();
+          MM.confetti(r.left + r.width / 2, r.top + r.height / 2, { count: 60 });
+          MM.haptic(12);
+          const allDone = data.arm.milestones.length && data.arm.milestones.every(function (x) { return x.done; });
+          if (allDone) setTimeout(function () { MM.celebrate(); toast("Tutte le tappe completate!", { tone: "win" }); }, 250);
+        }
+        render();
+      }
       return;
     }
     if (t.dataset.editMilestone) { openMilestoneForm(t.dataset.editMilestone); return; }
@@ -1832,6 +2193,27 @@
 
   function init() {
     load();
+    if (MM) {
+      MM.init();
+      MM.swipeHandlers.right = function (id, at) {
+        const task = data.tasks.find(function (x) { return x.id === id; });
+        if (!task) return;
+        if (task.done) { completeTask(task, {}); return; }
+        if (MM) MM.confetti(at.x, at.y, { count: 46, power: 0.8 });
+        task.done = true;
+        task.doneAt = new Date().toISOString();
+        save();
+        render();
+        const left = data.tasks.filter(function (x) { return !x.done; }).length;
+        const undo = function () { task.done = false; delete task.doneAt; save(); render(); toast("Annullato"); };
+        if (!left) { MM.celebrate(); toast("Hai finito tutto. Ottimo lavoro!", { tone: "win", action: "Annulla", onAction: undo }); }
+        else toast("Fatto. Ne restano " + left, { action: "Annulla", onAction: undo });
+      };
+      MM.swipeHandlers.left = function (id) { deleteTaskWithUndo(id); };
+      MM.canPull = function () { return tab === "home" && !examDetailId && $("#sheet-root").hidden; };
+      MM.pullHandler = function () { drawNextPhrase(); render(); };
+      MM.onTick(liveTick);
+    }
     const params = new URLSearchParams(location.search);
     if (params.has("demo") && !data.tasks.length && !data.exams.length && !data.transactions.length) {
       loadDemo();

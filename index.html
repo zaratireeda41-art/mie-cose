@@ -16,12 +16,20 @@
     <link rel="icon" type="image/png" href="icons/favicon.png">
     <title>Mie Cose</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="motion.css">
   </head>
   <body data-theme="home">
+    <div id="splash" class="splash" aria-hidden="true">
+      <div class="splash-glow"></div>
+      <img src="logo.svg" width="96" height="96" alt="">
+      <p>Mie Cose</p>
+    </div>
     <div class="ambiance" aria-hidden="true">
+      <span class="aurora"></span>
       <span class="orb orb-a"></span>
       <span class="orb orb-b"></span>
       <span class="orb orb-c"></span>
+      <span class="orb orb-d"></span>
     </div>
     <div id="app">
       <header class="topbar" id="topbar">
@@ -103,6 +111,7 @@
     <script src="push-config.js"></script>
     <script src="frasi.js"></script>
     <script type="module" src="arm3d.js"></script>
+    <script src="motion.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>
