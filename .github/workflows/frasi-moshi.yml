@@ -1,0 +1,26 @@
+name: Frasi via Moshi
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  invia-frase:
+    name: Invia la frase del momento
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Invia la frase del momento
+        env:
+          MOSHI_TOKEN: ${{ secrets.MOSHI_TOKEN }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: node scripts/moshi-frase.mjs
